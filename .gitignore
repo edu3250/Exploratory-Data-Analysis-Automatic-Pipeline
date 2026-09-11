@@ -41,19 +41,18 @@ htmlcov/
 .tox/
 
 # Project-specific
-reports/
-logs/
-*.csv
-*.xlsx
-*.parquet
-*.json
-data/raw/*
-data/interim/*
-data/processed/*
-data/external/*
+# Datasets are never versioned (they may contain private information): everything under
+# data/ is ignored except the folder skeleton (.gitkeep). Keep every dataset inside data/,
+# since data files elsewhere are no longer ignored (test fixtures, for instance).
+data/**
+!data/**/
+!data/**/.gitkeep
 
-# Keep .gitkeep
-!.gitkeep
+# Generated outputs: ignored, but the empty folders stay in the repo.
+reports/*
+!reports/.gitkeep
+logs/*
+!logs/.gitkeep
 
 # Notebooks
 .ipynb_checkpoints/

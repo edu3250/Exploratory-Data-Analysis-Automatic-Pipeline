@@ -229,10 +229,29 @@ class TestDataLoader:
         assert detect_decimal_separator(Path("unused.csv"), "utf-8", ",") == "."
 
     def test_load_data_latin1_matches_ecommerce_column_types(self, tmp_output_dir):
-        """Acceptance test for bug #7: auto-detected decimal must yield numeric (not text) columns."""
-        df = load_data(Path("data/raw/data_latin1.csv"))
-        assert df["amount_spent"].dtype.kind == "f" or str(df["amount_spent"].dtype) == "Float64"
-        assert str(df["is_churn"].dtype) in ("Float64", "boolean")
+        """Acceptance test for bug #7: a cp1252 ';' file with decimal commas loads with the same
+        column types as its comma-separated UTF-8 twin.
+
+        Both files are generated here: the test used to read data/raw/data_latin1.csv, which is
+        gitignored, so it failed on any fresh clone of the repository.
+        """
+        df = pd.DataFrame(
+            {
+                "region": ["Norte", "Sur", "Centro", "Oeste"] * 5,
+                "product_category": ["Electrónica", "Ropa", "Hogar", "Jardín"] * 5,
+                "amount_spent": [24.598, 111.139, 5.5, 300.25] * 5,
+                "is_churn": [0.0, 1.0, 0.0, 0.0] * 5,
+            }
+        )
+        latin1_path = tmp_output_dir / "data_latin1.csv"
+        utf8_path = tmp_output_dir / "ecommerce.csv"
+        df.to_csv(latin1_path, index=False, sep=";", decimal=",", encoding="cp1252")
+        df.to_csv(utf8_path, index=False)
+
+        latin1 = load_data(latin1_path)
+        assert latin1["amount_spent"].dtype.kind == "f" or str(latin1["amount_spent"].dtype) == "Float64"
+        assert latin1["product_category"].iloc[0] == "Electrónica"
+        assert infer_all_types(latin1) == infer_all_types(load_data(utf8_path))
 
     # --- Bug #3: batch file discovery ---------------------------------------------------------
 

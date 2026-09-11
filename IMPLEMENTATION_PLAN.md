@@ -118,3 +118,24 @@ regenerated in `reports/`; prior stale examples moved out of the repo.
 - Overall coverage **88%**: `cli.py` 81%, `data_loader.py` 92%, `pipeline.py` 97%, `html_report.py` 97%, `relationships.py` 88%.
 - `ruff check .` and `ruff format --check .` are clean.
 - Example reports regenerated with the final code: `reports/ecommerce_20260911_004138` and `reports/sales_20260911_004231`.
+
+## Stage 8: Fixes found analysing the Mexican mortgage data (GitHub Flow)
+**Goal**: Deliver, as three independent pull requests against `main` (GitHub Flow), the problems found when running the pipeline on `data/raw/mx` and when verifying the GitHub repository:
+- `fix/tests-sin-datos-locales`:
+  - a test read the gitignored `data/raw/data_latin1.csv` and failed on every fresh clone;
+  - `.gitignore` ignored CSV/JSON/Excel/Parquet files repo-wide instead of only inside `data/`.
+- `fix/categoricas-etiquetas-largas`:
+  - string columns became "text" when their labels averaged more than 50 characters or they had more than 20 distinct values, even when the values repeat;
+  - key categoricals were therefore left out of the categorical analysis (e.g. `causa_incumplimiento`, 28 values over 452 rows).
+- `fix/alertas-cardinalidad-numericas`:
+  - the high-cardinality alert fired on numeric and date columns (18 of the 20 alerts on the mx reports were this noise).
+
+**Success Criteria**:
+- Each PR ships with regression tests that fail before its fix.
+- The full suite passes on a fresh checkout.
+- `ruff check .` and `ruff format --check .` are clean.
+- On `data/raw/mx`, the four long-label columns are categorical and only the two real alerts remain.
+
+**Tests**: see each pull request.
+
+**Status**: In Progress — pull requests open, pending review and merge.
