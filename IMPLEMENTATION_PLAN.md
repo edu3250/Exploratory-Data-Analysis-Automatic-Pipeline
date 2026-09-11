@@ -156,7 +156,7 @@ Verified with real output:
 
 ## Stage 9: Fixes found analysing the Vistara dataset (GitHub Flow)
 **Goal**: Deliver, as two independent pull requests against `main`, the two problems the user found in the eight reports of the `data/raw/Vistara` batch run:
-- `fix/id-columns-cardinality-alert`: ID columns were reported as high cardinality — 16 of the 18 alerts across the eight reports were this noise (`customer_id`, `transaction_id`, `order_number`, `return_id`, `order_detail_id`, ...). Two causes:
+- `fix/id-columns-cardinality-alert`: ID columns were reported as high cardinality — 11 of the 14 alerts across the eight reports were this noise (`customer_id`, `transaction_id`, `order_number`, `return_id`, `order_detail_id`, ...). Two causes:
   - the high-cardinality check exempted numbers and dates, but not the `identifier` type;
   - a foreign key that repeats (`customer_id`: 7063 distinct values over 219432 rows) was never recognised as an identifier, because the rule required the values to be unique per row.
 - `feat/report-column-types`: the «Calidad de Datos» table did not show how each column had been classified, so a wrong classification stayed invisible.
@@ -173,6 +173,21 @@ Verified with real output:
   - `tests/test_modules.py::TestTypeInference::test_repeated_codes_are_identifiers` and `test_identifier_floor_follows_the_cardinality_threshold`, with `test_few_repeated_codes_stay_categorical` and `test_plain_labels_are_not_identifiers` as guards against over-reach;
   - `tests/test_modules.py::TestDataQuality::test_high_cardinality_ignores_identifier_columns`;
   - `tests/test_integration.py::TestIdentifierColumns::test_id_columns_are_not_flagged_as_high_cardinality`, end to end through the pipeline.
-- `feat/report-column-types`: added on its own branch.
+- `feat/report-column-types`:
+  - `tests/test_modules.py::TestHtmlReport::test_column_quality_rows_show_dtype_and_inferred_category`, `test_column_quality_rows_label_identifiers` and `test_column_quality_rows_without_types_are_still_written` (both type maps are optional arguments);
+  - `tests/test_integration.py::TestOutputCompleteness::test_quality_table_shows_how_each_column_was_classified`, which renders the report and checks the cells and the CSV twin.
 
-**Status**: In Progress
+**Status**: COMPLETE. Both pull requests were merged on 2026-09-11:
+
+| PR | Merge commit |
+|---|---|
+| #5 | c059551 |
+| #6 | cb1ca22 |
+
+Verified with real output:
+- **147 tests passed**, 0 failed, 0 warnings, on a tree with both branches merged (143 on #5's branch alone, 141 on #6's).
+- `ruff check .` and `ruff format --check .` are clean.
+- Differential check across the 16 datasets in `data/raw`, before vs after: 4 columns change type, every one of them a foreign key (`order_number` and `customer_id`), alerts drop from 20 to 7, and **no new alert appears**. The mx datasets keep every type and alert they had.
+- Regenerating the eight `data/raw/Vistara` reports with the merged code cuts their alerts from 14 to 3, none about IDs: `customer_first_name` (free text), `year_id` (constant) and `transaction_time` (a time of day still read as a category). No step failed.
+
+Note: the alert counts above were first written as "16 of the 18", which are the totals across every dataset in `data/raw` (20 before the fix, 7 after), not the Vistara ones. PR #5 was merged before the correction landed, so this PR carries it.

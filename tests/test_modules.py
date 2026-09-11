@@ -552,7 +552,7 @@ class TestDataQuality:
 
     def test_high_cardinality_ignores_identifier_columns(self):
         # An ID holds one value per entity by definition, so "too many distinct values" is not a
-        # finding: 16 of the 18 alerts on the Vistara reports were this noise.
+        # finding: 11 of the 14 alerts on the Vistara reports were this noise.
         n = 300
         df = pd.DataFrame(
             {
