@@ -28,7 +28,7 @@ from eda_pipeline.data_loader import (
     load_data,
 )
 from eda_pipeline.data_quality import analyze_data_quality, analyze_duplicates
-from eda_pipeline.html_report import overall_missing_pct
+from eda_pipeline.html_report import column_quality_rows, overall_missing_pct
 from eda_pipeline.outlier_detection import detect_outliers_iqr, detect_outliers_mad
 from eda_pipeline.relationships import correlation_ratio, cramers_v, pearson_correlation
 from eda_pipeline.target_analysis import analyze_class_balance
@@ -680,6 +680,38 @@ class TestHtmlReport:
 
     def test_overall_missing_pct_without_columns_is_zero(self):
         assert overall_missing_pct({}) == 0.0
+
+    def test_column_quality_rows_show_dtype_and_inferred_category(self):
+        # The quality table must say how each column was classified: quantity int / discrete.
+        # The loader reads with the nullable backend, hence "Int64" rather than "int64".
+        rows = column_quality_rows(
+            missing_per_column={"quantity": 0.0, "unit_price": 2.5},
+            column_types={"quantity": "numeric_discrete", "unit_price": "numeric_continuous"},
+            column_dtypes={"quantity": "Int64", "unit_price": "Float64"},
+        )
+        assert [row["column"] for row in rows] == ["unit_price", "quantity"]  # still sorted by missing
+        assert rows[1] == {
+            "column": "quantity",
+            "dtype": "int",
+            "dtype_raw": "Int64",
+            "type_label": "Numérica discreta",
+            "missing_pct": 0.0,
+        }
+
+    def test_column_quality_rows_label_identifiers(self):
+        rows = column_quality_rows(
+            missing_per_column={"customer_id": 0.0},
+            column_types={"customer_id": "identifier"},
+            column_dtypes={"customer_id": "string"},
+        )
+        assert rows[0]["type_label"] == "Identificador"
+        assert rows[0]["dtype"] == "texto"
+
+    def test_column_quality_rows_without_types_are_still_written(self):
+        # The type maps are optional arguments of generate_html_report.
+        assert column_quality_rows({"a": 1.0}) == [
+            {"column": "a", "dtype": "—", "dtype_raw": "—", "type_label": "—", "missing_pct": 1.0}
+        ]
 
 
 if __name__ == "__main__":
