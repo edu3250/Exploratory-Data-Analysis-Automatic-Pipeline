@@ -354,6 +354,25 @@ class TestTypeInference:
         dtype = infer_semantic_type(series)
         assert dtype == "text"
 
+    def test_long_repeated_labels_are_categorical(self):
+        # 8 labels longer than 50 characters over 400 rows, like "evento_origen_siniestro":
+        # the old rule called any column with long labels free text.
+        labels = [f"Evento de origen del siniestro número {i}, con una descripción larga" for i in range(8)]
+        series = pd.Series(labels * 50, name="evento")
+        assert infer_semantic_type(series) == "categorical"
+
+    def test_many_repeated_categories_are_categorical(self):
+        # 28 values over 452 rows, like "causa_incumplimiento": above the old fixed cut-off of
+        # 20 distinct values, but every value repeats, so it is a category.
+        causes = [f"Causa de incumplimiento {i}" for i in range(28)]
+        series = pd.Series((causes * 17)[:452], name="causa")
+        assert infer_semantic_type(series) == "categorical"
+
+    def test_rarely_repeated_strings_stay_free_text(self):
+        comments = [f"Comentario del ejecutivo sobre el cliente {i}" for i in range(300)]
+        series = pd.Series(comments + comments[:30], name="comentario")
+        assert infer_semantic_type(series) == "text"
+
     def test_constant(self):
         series = pd.Series(["X"] * 100, name="const")
         dtype = infer_semantic_type(series)

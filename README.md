@@ -262,13 +262,16 @@ Por ejemplo, con `--output-dir reports` los logs quedan en `logs/`, junto a `rep
 
 - **numeric_continuous**: Float, muchos valores únicos (ej: edad, salario)
 - **numeric_discrete**: Int, pocos valores únicos (ej: num_hijos, rating 1-5)
-- **categorical**: String/Object, pocos únicos (ej: región, género)
+- **categorical**: Texto cuyos valores se repiten (ej: región, género, causa de incumplimiento), sin
+  importar lo largas que sean las etiquetas. Con hasta 20 valores distintos siempre es categórica;
+  por encima de eso lo sigue siendo mientras la mayoría de las filas repitan valores.
 - **boolean**: True/False, sí/no
 - **datetime**: Fecha/hora; para columnas de texto, solo se reconocen formatos explícitos
   (ISO 8601, `dd/mm/aaaa`, `mm/dd/aaaa`, `dd-mm-aaaa`, con o sin hora) con una proporción alta
   de aciertos, priorizando día-primero en casos ambiguos. Los valores numéricos con separador
   decimal no se confunden con fechas.
-- **text**: String largo (>50 caracteres promedio), free text
+- **text**: Texto libre: más de 20 valores distintos y más de la mitad de las filas con un valor
+  diferente (ej: comentarios, descripciones, direcciones)
 - **identifier**: Alfanumérico único (ej: IDs)
 - **constant**: Un solo valor único
 
