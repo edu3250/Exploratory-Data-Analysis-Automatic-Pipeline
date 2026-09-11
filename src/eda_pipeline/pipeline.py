@@ -297,6 +297,7 @@ class EDAPipeline:
             cardinality_threshold=self.config.data_quality.cardinality_threshold,
             constant_threshold=self.config.data_quality.constant_threshold,
             duplicate_threshold=self.config.data_quality.duplicate_threshold,
+            column_types=column_types,
             default=_empty_data_quality_report(df),
         )
 

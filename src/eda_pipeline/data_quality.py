@@ -203,9 +203,20 @@ def analyze_constants(
     return constant_cols, quasi_constant_cols, alerts
 
 
-def analyze_cardinality(df: pd.DataFrame, cardinality_threshold: int = 100) -> tuple[dict[str, int], list[Alert]]:
+# Semantic types for which many distinct values are expected (amounts, balances, dates), not a
+# data-quality problem.
+CARDINALITY_EXEMPT_TYPES = {"numeric_continuous", "numeric_discrete", "datetime", "boolean", "constant"}
+
+
+def analyze_cardinality(
+    df: pd.DataFrame, cardinality_threshold: int = 100, column_types: Optional[dict[str, str]] = None
+) -> tuple[dict[str, int], list[Alert]]:
     """
-    Identify high-cardinality columns.
+    Identify high-cardinality columns among categorical-like columns (categorical, text, identifier).
+
+    Numbers and dates are skipped: thousands of distinct amounts or timestamps are normal. The
+    inferred semantic types are used when given (so dates stored as text are skipped too),
+    otherwise the column dtypes.
 
     Returns:
         (high_cardinality_columns, alerts)
@@ -214,6 +225,11 @@ def analyze_cardinality(df: pd.DataFrame, cardinality_threshold: int = 100) -> t
     high_cardinality = {}
 
     for col in df.columns:
+        if column_types is not None and col in column_types:
+            if column_types[col] in CARDINALITY_EXEMPT_TYPES:
+                continue
+        elif pd.api.types.is_numeric_dtype(df[col]) or pd.api.types.is_datetime64_any_dtype(df[col]):
+            continue
         n_unique = df[col].nunique()
         if n_unique > cardinality_threshold:
             high_cardinality[col] = n_unique
@@ -316,9 +332,14 @@ def analyze_data_quality(
     cardinality_threshold: int = 100,
     constant_threshold: float = 0.99,
     duplicate_threshold: float = 0.1,
+    column_types: Optional[dict[str, str]] = None,
 ) -> DataQualityReport:
     """
     Perform comprehensive data quality analysis.
+
+    Args:
+        column_types: Inferred semantic types, so the cardinality check can skip numbers and
+            dates even when they are stored as text.
 
     Returns:
         DataQualityReport with all metrics and alerts
@@ -327,7 +348,7 @@ def analyze_data_quality(
     missing_per_col, missing_per_row, missing_alerts = analyze_missing(df, missing_threshold)
     n_duplicates, dup_rows, dup_alerts = analyze_duplicates(df, duplicate_threshold)
     const_cols, quasi_const_cols, const_alerts = analyze_constants(df, constant_threshold)
-    high_card_cols, card_alerts = analyze_cardinality(df, cardinality_threshold)
+    high_card_cols, card_alerts = analyze_cardinality(df, cardinality_threshold, column_types)
     mixed_cols, mixed_alerts = detect_mixed_types(df)
     numeric_text, numeric_alerts = detect_numeric_as_text(df)
 

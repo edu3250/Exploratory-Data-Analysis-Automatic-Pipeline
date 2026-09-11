@@ -300,7 +300,8 @@ El sistema genera alertas (alta, media, baja) para:
 - Duplicados exactos: la severidad depende de `duplicate_threshold` (por encima del umbral → alta;
   por encima de la mitad del umbral → media; el resto → baja)
 - Columnas constantes/quasi-constantes (`constant_threshold`)
-- Alta cardinalidad (`cardinality_threshold`)
+- Alta cardinalidad (`cardinality_threshold`), solo en columnas categóricas, de texto o
+  identificadores: los números y las fechas tienen muchos valores distintos por naturaleza
 - Tipos mixtos en columnas
 - Números almacenados como texto
 - Desbalance de clases en el target (ver más abajo)

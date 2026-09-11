@@ -509,6 +509,27 @@ class TestDataQuality:
         report = analyze_data_quality(synthetic_dataset)
         assert "high_cardinality" in report.high_cardinality_columns
 
+    def test_high_cardinality_ignores_numeric_and_date_columns(self):
+        # Amounts and dates naturally have thousands of distinct values; only categorical-like
+        # columns deserve the alert (18 of the 20 alerts on the Mexican mortgage data were noise).
+        n = 300
+        df = pd.DataFrame(
+            {
+                "monto": np.linspace(1_000.0, 2_000_000.0, n),
+                "fecha": pd.date_range("2020-01-01", periods=n, freq="D"),
+                "municipio": [f"Municipio {i % 150}" for i in range(n)],
+            }
+        )
+        report = analyze_data_quality(df, cardinality_threshold=100)
+        assert set(report.high_cardinality_columns) == {"municipio"}
+        assert [a.column for a in report.alerts if "alta cardinalidad" in a.message] == ["municipio"]
+
+    def test_high_cardinality_uses_semantic_types_for_dates_stored_as_text(self):
+        dates = pd.date_range("2020-01-01", periods=300, freq="D").strftime("%Y-%m-%d")
+        df = pd.DataFrame({"fecha": dates})
+        report = analyze_data_quality(df, cardinality_threshold=100, column_types={"fecha": "datetime"})
+        assert report.high_cardinality_columns == {}
+
     def test_alerts_generated(self, synthetic_dataset):
         report = analyze_data_quality(synthetic_dataset)
         assert len(report.alerts) > 0
