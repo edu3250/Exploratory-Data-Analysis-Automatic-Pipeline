@@ -383,6 +383,32 @@ class TestTypeInference:
         dtype = infer_semantic_type(series)
         assert dtype == "identifier"
 
+    def test_repeated_codes_are_identifiers(self):
+        # A foreign key repeats, so the "mostly unique" rule misses it: 1000 customer codes over
+        # 3000 rows were read as a category and then flagged as high cardinality (Vistara).
+        codes = [f"CUST-{i:05d}" for i in range(1000)]
+        assert infer_semantic_type(pd.Series(codes * 3, name="customer_id")) == "identifier"
+
+    def test_few_repeated_codes_stay_categorical(self):
+        # 40 product codes over 2000 rows are a useful grouping, not an identifier, and they
+        # never reach the high-cardinality threshold either.
+        codes = [f"PROD-{i:03d}" for i in range(40)]
+        assert infer_semantic_type(pd.Series(codes * 50, name="product_id")) == "categorical"
+
+    def test_identifier_floor_follows_the_cardinality_threshold(self):
+        # The floor is the high-cardinality threshold, so a column of codes is either analysed
+        # as a category or recognised as an ID, but never flagged as high cardinality.
+        codes = [f"C-{i:04d}" for i in range(60)]
+        series = pd.Series(codes * 10, name="cliente")
+        assert infer_semantic_type(series) == "categorical"
+        assert infer_semantic_type(series, identifier_min_unique=50) == "identifier"
+
+    def test_plain_labels_are_not_identifiers(self):
+        # Only code-shaped values (letters and digits, no spaces) become identifiers; plain
+        # labels keep their type, and their alert.
+        labels = [f"Municipio {i}" for i in range(150)]
+        assert infer_semantic_type(pd.Series(labels * 3, name="municipio")) == "categorical"
+
     # --- Bug #6: date inference must be precise and warning-free -----------------------------
 
     def test_string_dates_iso_format_detected_without_warning(self, recwarn):
@@ -521,6 +547,21 @@ class TestDataQuality:
             }
         )
         report = analyze_data_quality(df, cardinality_threshold=100)
+        assert set(report.high_cardinality_columns) == {"municipio"}
+        assert [a.column for a in report.alerts if "alta cardinalidad" in a.message] == ["municipio"]
+
+    def test_high_cardinality_ignores_identifier_columns(self):
+        # An ID holds one value per entity by definition, so "too many distinct values" is not a
+        # finding: 16 of the 18 alerts on the Vistara reports were this noise.
+        n = 300
+        df = pd.DataFrame(
+            {
+                "customer_id": [f"CUST-{i:05d}" for i in range(n)],
+                "municipio": [f"Municipio {i % 150}" for i in range(n)],
+            }
+        )
+        column_types = {"customer_id": "identifier", "municipio": "categorical"}
+        report = analyze_data_quality(df, cardinality_threshold=100, column_types=column_types)
         assert set(report.high_cardinality_columns) == {"municipio"}
         assert [a.column for a in report.alerts if "alta cardinalidad" in a.message] == ["municipio"]
 

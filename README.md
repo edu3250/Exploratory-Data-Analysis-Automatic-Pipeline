@@ -272,7 +272,11 @@ Por ejemplo, con `--output-dir reports` los logs quedan en `logs/`, junto a `rep
   decimal no se confunden con fechas.
 - **text**: Texto libre: más de 20 valores distintos y más de la mitad de las filas con un valor
   diferente (ej: comentarios, descripciones, direcciones)
-- **identifier**: Alfanumérico único (ej: IDs)
+- **identifier**: Códigos que nombran una entidad (IDs): alfanuméricos sin espacios, con letras y
+  dígitos (ej: `CUST-00001`, `ORD-2024-000001`). Se reconocen tanto los únicos por fila (clave
+  primaria) como los que se repiten (clave foránea) en cuanto superan `cardinality_threshold`
+  valores distintos. Por debajo de ese umbral un código sigue siendo una categoría útil para
+  agrupar (ej: 40 `product_id`). Los identificadores nunca generan alertas de cardinalidad.
 - **constant**: Un solo valor único
 
 Estos tipos pueden sobreescribirse por columna mediante `column_types` en la configuración (ver

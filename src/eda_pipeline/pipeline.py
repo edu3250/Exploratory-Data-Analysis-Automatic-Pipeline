@@ -257,7 +257,7 @@ class EDAPipeline:
         # Type inference + user overrides. Not step-isolated: every later step depends on it,
         # so a failure here should surface as a dataset-level error (via _load_and_analyze).
         self.logger.info("Inferring column types...")
-        column_types = infer_all_types(df)
+        column_types = infer_all_types(df, identifier_min_unique=self.config.data_quality.cardinality_threshold)
         df, override_result = apply_column_type_overrides(df, column_types, self.config.column_types)
         column_types = override_result.column_types
 

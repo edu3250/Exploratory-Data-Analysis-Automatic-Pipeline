@@ -203,20 +203,28 @@ def analyze_constants(
     return constant_cols, quasi_constant_cols, alerts
 
 
-# Semantic types for which many distinct values are expected (amounts, balances, dates), not a
-# data-quality problem.
-CARDINALITY_EXEMPT_TYPES = {"numeric_continuous", "numeric_discrete", "datetime", "boolean", "constant"}
+# Semantic types for which many distinct values are expected (amounts, balances, dates, IDs), not
+# a data-quality problem. An identifier holds one value per entity, so many distinct values is
+# what an ID looks like rather than a finding worth reporting.
+CARDINALITY_EXEMPT_TYPES = {
+    "numeric_continuous",
+    "numeric_discrete",
+    "datetime",
+    "boolean",
+    "constant",
+    "identifier",
+}
 
 
 def analyze_cardinality(
     df: pd.DataFrame, cardinality_threshold: int = 100, column_types: Optional[dict[str, str]] = None
 ) -> tuple[dict[str, int], list[Alert]]:
     """
-    Identify high-cardinality columns among categorical-like columns (categorical, text, identifier).
+    Identify high-cardinality columns among categorical and free-text columns.
 
-    Numbers and dates are skipped: thousands of distinct amounts or timestamps are normal. The
-    inferred semantic types are used when given (so dates stored as text are skipped too),
-    otherwise the column dtypes.
+    Numbers, dates and identifiers are skipped: thousands of distinct amounts, timestamps or
+    customer codes are normal. The inferred semantic types are used when given (so dates stored
+    as text, and IDs, are skipped too), otherwise the column dtypes.
 
     Returns:
         (high_cardinality_columns, alerts)

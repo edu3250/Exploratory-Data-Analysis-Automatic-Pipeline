@@ -462,6 +462,32 @@ class TestOutputCompleteness:
         assert '<div class="value">12.5%</div>' in html
 
 
+class TestIdentifierColumns:
+    """ID columns must not be reported as high cardinality (found on the Vistara dataset)."""
+
+    def test_id_columns_are_not_flagged_as_high_cardinality(self, tmp_output_dir):
+        n = 600
+        df = pd.DataFrame(
+            {
+                "transaction_id": [f"TXN-{i:06d}" for i in range(n)],  # primary key: unique
+                "customer_id": [f"CUST-{i % 300:05d}" for i in range(n)],  # foreign key: repeats
+                "ciudad": [f"Ciudad {i % 150}" for i in range(n)],  # a genuine high-cardinality category
+                "monto": [100.0 + i for i in range(n)],
+            }
+        )
+        csv_file = tmp_output_dir / "ventas.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        summary = json.loads(Path(results["ventas"]["summary_json"]).read_text(encoding="utf-8"))
+        assert summary["column_types"]["transaction_id"] == "identifier"
+        assert summary["column_types"]["customer_id"] == "identifier"
+        assert set(summary["data_quality"]["high_cardinality_columns"]) == {"ciudad"}
+        flagged = [a["column"] for a in summary["alerts"] if "alta cardinalidad" in a["message"]]
+        assert flagged == ["ciudad"]
+
+
 class TestVerboseLogging:
     """Bug #17: --verbose (Config.verbose) must actually enable DEBUG-level logging."""
 

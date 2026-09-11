@@ -108,10 +108,39 @@ def _coerce_to_datetime(series: pd.Series) -> pd.Series:
 # distinct; values that repeat are categories however long or numerous the labels are.
 FREE_TEXT_MIN_UNIQUE_RATIO = 0.5
 
+# An entity code such as "CUST-00001" or "ORD-2024-000001": letters and digits (both required, so
+# plain labels like "Monterrey" and bare numbers are excluded), optionally joined by "-" or "_",
+# and never containing spaces.
+_CODE_PATTERN = re.compile(r"^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9_-]+$")
 
-def infer_semantic_type(series: pd.Series, numeric_discrete_threshold: int = 20) -> SemanticType:
+# Share of a column's values that must look like codes before it is read as a key.
+CODE_MIN_SHARE = 0.9
+
+# A foreign key repeats, so the "mostly unique" rule cannot recognise it. Above this many distinct
+# values, a column of codes names entities instead of describing them. The floor is the
+# high-cardinality threshold (the pipeline passes the configured one), so a column of codes is
+# either analysed as a category or recognised as an ID, but never flagged as high cardinality.
+IDENTIFIER_MIN_UNIQUE = 100
+
+
+def _looks_like_codes(valid: pd.Series) -> bool:
+    """Do (almost) all of these values look like entity codes, e.g. "CUST-00001"?"""
+    return float(valid.str.match(_CODE_PATTERN).fillna(False).mean()) >= CODE_MIN_SHARE
+
+
+def infer_semantic_type(
+    series: pd.Series,
+    numeric_discrete_threshold: int = 20,
+    identifier_min_unique: int = IDENTIFIER_MIN_UNIQUE,
+) -> SemanticType:
     """
     Infer semantic type of a column.
+
+    Args:
+        series: The column to classify.
+        numeric_discrete_threshold: Above this many distinct values a number is continuous.
+        identifier_min_unique: Above this many distinct values, a column of codes is an
+            identifier rather than a category (see IDENTIFIER_MIN_UNIQUE).
 
     Returns one of:
         - numeric_continuous: float or int with many unique values
@@ -120,7 +149,8 @@ def infer_semantic_type(series: pd.Series, numeric_discrete_threshold: int = 20)
         - boolean: True/False values
         - datetime: datetime or date string
         - text: free text, i.e. string values that rarely repeat
-        - identifier: alphanumeric strings that appear to be unique IDs
+        - identifier: codes that name an entity (IDs), either unique per row or repeated as a
+          foreign key
         - constant: all values the same
     """
     # Remove nulls
@@ -168,6 +198,12 @@ def infer_semantic_type(series: pd.Series, numeric_discrete_threshold: int = 20)
             if alphanumeric_count / n_total > 0.8:
                 return "identifier"
 
+        # A foreign key repeats, so the rule above cannot see it: customer_id held 7063 codes
+        # over 219432 rows and was read as a category, then flagged as high cardinality. Past the
+        # floor, a column of codes names entities (CUST-00001) instead of describing them.
+        if n_unique > identifier_min_unique and _looks_like_codes(valid):
+            return "identifier"
+
         # Repetition, not label length or a fixed count, is what separates a category from free
         # text: 8 long event names, or 28 causes of default spread over 452 rows, are categories.
         if n_unique <= numeric_discrete_threshold:
@@ -181,7 +217,10 @@ def infer_semantic_type(series: pd.Series, numeric_discrete_threshold: int = 20)
 
 
 def infer_all_types(
-    df: pd.DataFrame, numeric_discrete_threshold: int = 20, config_overrides: dict[str, str] | None = None
+    df: pd.DataFrame,
+    numeric_discrete_threshold: int = 20,
+    config_overrides: dict[str, str] | None = None,
+    identifier_min_unique: int = IDENTIFIER_MIN_UNIQUE,
 ) -> dict[str, SemanticType]:
     """
     Infer semantic types for all columns, with config overrides.
@@ -190,6 +229,9 @@ def infer_all_types(
         df: DataFrame
         numeric_discrete_threshold: Threshold for treating numeric as discrete
         config_overrides: Dict mapping column names to desired types
+        identifier_min_unique: Distinct values above which a column of codes is an identifier;
+            the pipeline passes `data_quality.cardinality_threshold` so that an ID is never
+            flagged as high cardinality
 
     Returns:
         Dictionary mapping column name to inferred type
@@ -201,7 +243,7 @@ def infer_all_types(
         if col in config_overrides:
             types[col] = config_overrides[col]
         else:
-            types[col] = infer_semantic_type(df[col], numeric_discrete_threshold)
+            types[col] = infer_semantic_type(df[col], numeric_discrete_threshold, identifier_min_unique)
 
     return types
 

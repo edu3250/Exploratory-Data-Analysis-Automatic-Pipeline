@@ -153,3 +153,26 @@ Verified with real output:
 - 137 tests passed, 0 failed, 0 warnings, on a fresh checkout whose tree is identical to `main` at c14cde3.
 - `ruff check .` and `ruff format --check .` are clean.
 - Regenerating the `data/raw/mx` reports with the merged code makes the four long-label columns categorical and cuts the alerts from 20 to 2: `frecuencia_pago` and `valor_recuperado`, both quasi-constant. No step failed.
+
+## Stage 9: Fixes found analysing the Vistara dataset (GitHub Flow)
+**Goal**: Deliver, as two independent pull requests against `main`, the two problems the user found in the eight reports of the `data/raw/Vistara` batch run:
+- `fix/id-columns-cardinality-alert`: ID columns were reported as high cardinality — 16 of the 18 alerts across the eight reports were this noise (`customer_id`, `transaction_id`, `order_number`, `return_id`, `order_detail_id`, ...). Two causes:
+  - the high-cardinality check exempted numbers and dates, but not the `identifier` type;
+  - a foreign key that repeats (`customer_id`: 7063 distinct values over 219432 rows) was never recognised as an identifier, because the rule required the values to be unique per row.
+- `feat/report-column-types`: the «Calidad de Datos» table did not show how each column had been classified, so a wrong classification stayed invisible.
+
+**Success Criteria**:
+- Each PR ships with regression tests that fail before its fix.
+- Low-cardinality keys keep their categorical analysis (`product_id`, 40 values, keeps its bar chart and its associations).
+- The types and alerts of the mx and sample datasets are unchanged.
+- On the Vistara data, only alerts that are not about IDs survive.
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (each failed before its fix):
+- `fix/id-columns-cardinality-alert`:
+  - `tests/test_modules.py::TestTypeInference::test_repeated_codes_are_identifiers` and `test_identifier_floor_follows_the_cardinality_threshold`, with `test_few_repeated_codes_stay_categorical` and `test_plain_labels_are_not_identifiers` as guards against over-reach;
+  - `tests/test_modules.py::TestDataQuality::test_high_cardinality_ignores_identifier_columns`;
+  - `tests/test_integration.py::TestIdentifierColumns::test_id_columns_are_not_flagged_as_high_cardinality`, end to end through the pipeline.
+- `feat/report-column-types`: added on its own branch.
+
+**Status**: In Progress
