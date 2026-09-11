@@ -377,6 +377,9 @@ class EDAPipeline:
             or {}
         )
 
+        # How each column ended up stored, shown in the report next to its inferred type.
+        column_dtypes = {col: str(dtype) for col, dtype in df.dtypes.items()}
+
         self.logger.info("Writing tablas CSV...")
         self._run_step(
             "tables",
@@ -391,6 +394,8 @@ class EDAPipeline:
             mixed_pairs=relationships_report.mixed_pairs,
             outliers_report=outliers_report,
             alerts=combined_alerts,
+            column_types=column_types,
+            column_dtypes=column_dtypes,
             default=None,
         )
 
@@ -425,6 +430,8 @@ class EDAPipeline:
             alerts=combined_alerts,
             ignored_columns=override_result.ignored_columns,
             failed_steps=list(failed_steps),
+            column_types=column_types,
+            column_dtypes=column_dtypes,
             default=None,
         )
 

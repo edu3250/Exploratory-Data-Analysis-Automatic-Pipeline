@@ -252,6 +252,14 @@ reports/
     └── tables/
 ```
 
+En la sección «Calidad de Datos» del HTML, la tabla «Tipo y Valores Faltantes por Columna» indica
+para cada columna el tipo de dato con el que quedó almacenada (`int`, `float`, `texto`, `fecha`…,
+con el tipo exacto de pandas —`Int64`, `string`…— al pasar el cursor) y la categoría que le asignó
+el pipeline (Numérica continua, Categórica, Identificador, Fecha/hora…). Esa categoría es la que
+decide qué análisis y qué alertas recibe la
+columna, así que es el primer sitio donde mirar si algo quedó mal clasificado. Las mismas dos
+columnas aparecen en `tables/missing_per_column.csv`.
+
 Los logs de cada ejecución NO se guardan dentro de la carpeta del reporte, sino en una carpeta
 `logs/` hermana del directorio de salida (`<output_dir>/../logs/eda_<timestamp>_<correlation_id>.log`).
 Por ejemplo, con `--output-dir reports` los logs quedan en `logs/`, junto a `reports/`.

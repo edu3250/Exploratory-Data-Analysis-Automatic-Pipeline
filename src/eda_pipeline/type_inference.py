@@ -19,6 +19,56 @@ SemanticType = Literal[
     "numeric_continuous", "numeric_discrete", "categorical", "boolean", "datetime", "text", "identifier", "constant"
 ]
 
+# Spanish labels for the inferred types, shown per column in the HTML report and the CSV tables.
+SEMANTIC_TYPE_LABELS: dict[str, str] = {
+    "numeric_continuous": "Numérica continua",
+    "numeric_discrete": "Numérica discreta",
+    "categorical": "Categórica",
+    "boolean": "Booleana",
+    "datetime": "Fecha/hora",
+    "text": "Texto libre",
+    "identifier": "Identificador",
+    "constant": "Constante",
+}
+
+
+def semantic_type_label(semantic_type: str | None) -> str:
+    """Spanish label for an inferred type; an unknown or missing type is shown as a dash."""
+    if not semantic_type:
+        return "—"
+    return SEMANTIC_TYPE_LABELS.get(semantic_type, semantic_type)
+
+
+# Short names for the storage dtypes pandas reports. The loader reads with the nullable backend,
+# so a column of whole numbers arrives as "Int64" and one of text as "string"; the report shows
+# "int" and "texto" and keeps the exact dtype alongside.
+_DTYPE_LABEL_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("int", "int"),
+    ("uint", "int"),
+    ("float", "float"),
+    ("complex", "complejo"),
+    ("bool", "bool"),
+    ("datetime", "fecha"),
+    ("timedelta", "duración"),
+    ("period", "periodo"),
+    ("category", "categoría"),
+    ("string", "texto"),
+    ("str", "texto"),
+    ("object", "texto"),
+)
+
+
+def dtype_label(dtype: object) -> str:
+    """Short name for a pandas dtype ("Int64" -> "int", "string" -> "texto"); others as they are."""
+    if not dtype:
+        return "—"
+    name = str(dtype).lower()
+    for prefix, label in _DTYPE_LABEL_PREFIXES:
+        if name.startswith(prefix):
+            return label
+    return str(dtype)
+
+
 # Cheap regex pre-filter so obviously non-date strings (e.g. "24,598029558215444")
 # never reach pd.to_datetime. Restricted to the separators used by the explicit
 # formats below ('-', '/'), which also keeps decimal-comma numbers out.

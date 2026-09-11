@@ -9,6 +9,8 @@ from typing import Any
 
 import pandas as pd
 
+from .type_inference import dtype_label, semantic_type_label
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +40,8 @@ def write_result_tables(
     mixed_pairs: list,
     outliers_report,
     alerts: list,
+    column_types: dict[str, str] | None = None,
+    column_dtypes: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """
     Write CSV tables summarizing one dataset's analysis.
@@ -50,6 +54,8 @@ def write_result_tables(
         numeric_pairs, categorical_pairs, mixed_pairs: ``CorrelationPair`` lists from relationships analysis.
         outliers_report: ``OutlierReport`` from outlier detection.
         alerts: Combined list of ``Alert`` (data quality + target-derived).
+        column_types: Inferred semantic type per column, written next to its missing percentage.
+        column_dtypes: Storage dtype per column, written next to the inferred type.
 
     Returns:
         Dict mapping table name to the written CSV file path.
@@ -67,7 +73,17 @@ def write_result_tables(
         "missing_per_column": _write_csv(
             tables_dir,
             "missing_per_column",
-            pd.DataFrame([{"columna": col, "pct_faltante": pct} for col, pct in missing_per_column.items()]),
+            pd.DataFrame(
+                [
+                    {
+                        "columna": col,
+                        "tipo_dato": dtype_label((column_dtypes or {}).get(col)),
+                        "categoria_inferida": semantic_type_label((column_types or {}).get(col)),
+                        "pct_faltante": pct,
+                    }
+                    for col, pct in missing_per_column.items()
+                ]
+            ),
         ),
         "correlations": _write_csv(
             tables_dir,

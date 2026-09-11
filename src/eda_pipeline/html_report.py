@@ -10,6 +10,8 @@ from typing import Optional
 
 from jinja2 import Template
 
+from .type_inference import dtype_label, semantic_type_label
+
 logger = logging.getLogger(__name__)
 
 
@@ -328,16 +330,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <section id="calidad">
         <h2>🔍 Calidad de Datos</h2>
 
-        <h3>Valores Faltantes por Columna</h3>
+        <h3>Tipo y Valores Faltantes por Columna</h3>
+        <p>«Tipo de dato» es cómo quedó almacenada la columna (el tipo exacto de pandas aparece al
+           pasar el cursor); «Categoría inferida» es cómo la clasificó el pipeline, que es lo que
+           decide qué análisis y qué alertas recibe.</p>
         <table>
             <thead>
-                <tr><th>Columna</th><th>Faltantes (%)</th></tr>
+                <tr><th>Columna</th><th>Tipo de dato</th><th>Categoría inferida</th><th>Faltantes (%)</th></tr>
             </thead>
             <tbody>
-                {% for col, pct in missing_per_column[:20] %}
+                {% for row in column_quality %}
                 <tr>
-                    <td>{{ col }}</td>
-                    <td>{{ "%.2f" | format(pct) }}%</td>
+                    <td>{{ row.column }}</td>
+                    <td><code title="{{ row.dtype_raw }}">{{ row.dtype }}</code></td>
+                    <td>{{ row.type_label }}</td>
+                    <td>{{ "%.2f" | format(row.missing_pct) }}%</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -638,6 +645,8 @@ def generate_html_report(
     alerts: list,
     ignored_columns: Optional[list] = None,
     failed_steps: Optional[list] = None,
+    column_types: Optional[dict] = None,
+    column_dtypes: Optional[dict] = None,
 ) -> str:
     """
     Generate HTML report with embedded base64 images.
@@ -645,6 +654,8 @@ def generate_html_report(
     Args:
         ignored_columns: Columns excluded from analysis via `column_types.ignore`.
         failed_steps: Names of analysis steps that failed and were skipped (see pipeline._run_step).
+        column_types: Inferred semantic type per column, shown in the data quality table.
+        column_dtypes: Storage dtype per column (int64, float64, str, ...), shown next to it.
 
     Returns:
         Path to generated HTML file
@@ -667,7 +678,7 @@ def generate_html_report(
         "categorical_cols_count": len(categorical_stats),
         "missing_total": overall_missing_pct(data_quality.get("missing_per_column", {})),
         "duplicates": data_quality.get("duplicates", 0),
-        "missing_per_column": sorted(data_quality.get("missing_per_column", {}).items(), key=lambda x: -x[1])[:20],
+        "column_quality": column_quality_rows(data_quality.get("missing_per_column", {}), column_types, column_dtypes),
         "constant_columns": data_quality.get("constant_columns", []),
         "quasi_constant_columns": data_quality.get("quasi_constant_columns", {}),
         "numeric_stats": numeric_stats,
@@ -694,6 +705,34 @@ def generate_html_report(
 
     logger.info(f"HTML report saved: {output_path}")
     return str(output_path)
+
+
+def column_quality_rows(
+    missing_per_column: dict[str, float],
+    column_types: Optional[dict[str, str]] = None,
+    column_dtypes: Optional[dict[str, str]] = None,
+    limit: int = 20,
+) -> list[dict]:
+    """
+    One row per column for the data quality table: how it was classified, and how much is missing.
+
+    Ordered by missing percentage (descending) and capped at `limit` rows, as the table was before
+    the type columns were added. A column with no known type shows a dash, so the report still
+    renders when the maps are not provided.
+    """
+    column_types = column_types or {}
+    column_dtypes = column_dtypes or {}
+    ordered = sorted(missing_per_column.items(), key=lambda item: -item[1])[:limit]
+    return [
+        {
+            "column": col,
+            "dtype": dtype_label(column_dtypes.get(col)),
+            "dtype_raw": str(column_dtypes.get(col, "—")),
+            "type_label": semantic_type_label(column_types.get(col)),
+            "missing_pct": pct,
+        }
+        for col, pct in ordered
+    ]
 
 
 def overall_missing_pct(missing_per_column: dict[str, float]) -> float:

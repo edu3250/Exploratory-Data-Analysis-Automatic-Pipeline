@@ -397,6 +397,39 @@ class TestOutputCompleteness:
         }
         assert expected.issubset({p.name for p in tables_dir.glob("*.csv")})
 
+    def test_quality_table_shows_how_each_column_was_classified(self, tmp_output_dir):
+        """The «Calidad de Datos» table must show the dtype and the inferred category per column."""
+        n = 120
+        df = pd.DataFrame(
+            {
+                "quantity": [i % 5 + 1 for i in range(n)],
+                "unit_price": [10.5 + i for i in range(n)],
+                "ciudad": [f"Ciudad {i % 4}" for i in range(n)],
+            }
+        )
+        csv_file = tmp_output_dir / "ventas.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["ventas"]
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        assert "<th>Tipo de dato</th>" in html
+        assert "<th>Categoría inferida</th>" in html
+        for cell in (
+            '<td><code title="Int64">int</code></td>',  # exact pandas dtype kept in the tooltip
+            '<td><code title="Float64">float</code></td>',
+            "<td>Numérica discreta</td>",
+            "<td>Numérica continua</td>",
+            "<td>Categórica</td>",
+        ):
+            assert cell in html
+
+        # The CSV twin of that table carries the same two columns.
+        csv_text = (Path(result["output_dir"]) / "tables" / "missing_per_column.csv").read_text(encoding="utf-8")
+        assert "columna,tipo_dato,categoria_inferida,pct_faltante" in csv_text
+        assert "quantity,int,Numérica discreta" in csv_text
+
     def test_html_report_embeds_boxplots_and_timeseries(self, tmp_output_dir, synthetic_dataset):
         """Bug #18: boxplots and time series were generated but never embedded in the report."""
         csv_file = tmp_output_dir / "data.csv"
