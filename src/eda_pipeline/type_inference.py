@@ -104,6 +104,11 @@ def _coerce_to_datetime(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, errors="coerce")
 
 
+# Above numeric_discrete_threshold, a string column is free text only if most of its values are
+# distinct; values that repeat are categories however long or numerous the labels are.
+FREE_TEXT_MIN_UNIQUE_RATIO = 0.5
+
+
 def infer_semantic_type(series: pd.Series, numeric_discrete_threshold: int = 20) -> SemanticType:
     """
     Infer semantic type of a column.
@@ -111,10 +116,10 @@ def infer_semantic_type(series: pd.Series, numeric_discrete_threshold: int = 20)
     Returns one of:
         - numeric_continuous: float or int with many unique values
         - numeric_discrete: int with few unique values (≤threshold)
-        - categorical: string/object with few unique values
+        - categorical: string values that repeat (any label length)
         - boolean: True/False values
         - datetime: datetime or date string
-        - text: long string values (free text)
+        - text: free text, i.e. string values that rarely repeat
         - identifier: alphanumeric strings that appear to be unique IDs
         - constant: all values the same
     """
@@ -163,15 +168,13 @@ def infer_semantic_type(series: pd.Series, numeric_discrete_threshold: int = 20)
             if alphanumeric_count / n_total > 0.8:
                 return "identifier"
 
-        # Check for text (few unique, long average length)
-        if avg_length > 50:
-            return "text"
-
-        # Default to categorical
+        # Repetition, not label length or a fixed count, is what separates a category from free
+        # text: 8 long event names, or 28 causes of default spread over 452 rows, are categories.
         if n_unique <= numeric_discrete_threshold:
             return "categorical"
-        else:
+        if n_unique / n_total > FREE_TEXT_MIN_UNIQUE_RATIO:
             return "text"
+        return "categorical"
 
     # Default
     return "categorical"
