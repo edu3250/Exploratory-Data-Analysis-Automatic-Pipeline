@@ -136,6 +136,20 @@ regenerated in `reports/`; prior stale examples moved out of the repo.
 - `ruff check .` and `ruff format --check .` are clean.
 - On `data/raw/mx`, the four long-label columns are categorical and only the two real alerts remain.
 
-**Tests**: see each pull request.
+**Tests** (each failed before its fix):
+- PR #1: `tests/test_modules.py::TestDataLoader::test_load_data_latin1_matches_ecommerce_column_types`, which now builds its own CSV files.
+- PR #2: `tests/test_modules.py::TestTypeInference::test_long_repeated_labels_are_categorical` and `test_many_repeated_categories_are_categorical`, plus `test_rarely_repeated_strings_stay_free_text` as a guard.
+- PR #3: `tests/test_modules.py::TestDataQuality::test_high_cardinality_ignores_numeric_and_date_columns` and `test_high_cardinality_uses_semantic_types_for_dates_stored_as_text`.
 
-**Status**: In Progress — pull requests open, pending review and merge.
+**Status**: COMPLETE. All three pull requests were merged on 2026-09-11 and their branches deleted:
+
+| PR | Merge commit |
+|---|---|
+| #1 | b704ced |
+| #2 | d128fe1 |
+| #3 | c14cde3 |
+
+Verified with real output:
+- 137 tests passed, 0 failed, 0 warnings, on a fresh checkout whose tree is identical to `main` at c14cde3.
+- `ruff check .` and `ruff format --check .` are clean.
+- Regenerating the `data/raw/mx` reports with the merged code makes the four long-label columns categorical and cuts the alerts from 20 to 2: `frecuencia_pago` and `valor_recuperado`, both quasi-constant. No step failed.
