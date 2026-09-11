@@ -1,0 +1,36 @@
+batch_pattern: null
+column_types:
+  categorical: []
+  datetime: []
+  ignore: []
+  numeric: []
+  text: []
+data_quality:
+  cardinality_threshold: 100
+  constant_threshold: 0.99
+  duplicate_threshold: 0.1
+  missing_threshold: 0.95
+decimal: null
+delimiter: null
+encoding: null
+excel_sheet: null
+file_format: null
+outliers:
+  iqr_multiplier: 1.5
+  isolation_forest_contamination: 0.1
+  isolation_forest_enabled: true
+  z_score_threshold: 3.0
+output_dir: reports
+sample_size: null
+strict_mode: false
+target:
+  class_imbalance_threshold: 0.8
+  target_column: null
+  target_type: null
+verbose: false
+visualizations:
+  correlation_threshold: 0.05
+  max_boxplots: 20
+  max_correlation_heatmap_size: 30
+  max_histograms: 20
+  max_scatter_pairs: 10

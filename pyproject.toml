@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eda-pipeline"
+version = "0.1.0"
+description = "Complete Exploratory Data Analysis (EDA) pipeline for any tabular dataset"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Data Science Team", email = "dataops@example.com" }
+]
+license = { text = "MIT" }
+
+dependencies = [
+    "pandas>=2.2.0",
+    "numpy>=2.0.0",
+    "scipy>=1.10.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+    "scikit-learn>=1.4.0",
+    "click>=8.1.0",
+    "pyyaml>=6.0",
+    "jinja2>=3.1.0",
+    "chardet>=5.2.0,<8",
+    "pyarrow>=14.0.0",
+    "openpyxl>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+eda = "eda_pipeline.cli:cli"
+
+[tool.setuptools]
+packages = ["eda_pipeline"]
+package-dir = { "" = "src" }
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--strict-markers"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # Line too long (handled by formatter)
+
+[tool.ruff.lint.isort]
+known-first-party = ["eda_pipeline"]

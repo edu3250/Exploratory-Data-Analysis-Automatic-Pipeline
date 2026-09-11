@@ -1,0 +1,368 @@
+"""
+Visualization generation: plots saved as PNG with proper handling of edge cases.
+"""
+
+import matplotlib
+import pandas as pd
+
+matplotlib.use("Agg")  # Headless backend
+import logging
+import warnings
+from contextlib import contextmanager
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib import MatplotlibDeprecationWarning
+
+logger = logging.getLogger(__name__)
+
+# Style
+sns.set_style("whitegrid")
+plt.rcParams["figure.figsize"] = (10, 6)
+plt.rcParams["font.size"] = 9
+
+
+@contextmanager
+def _suppress_seaborn_boxplot_warning():
+    """
+    Seaborn 0.13.x internally calls Matplotlib's ``Axes.bxp()`` with the
+    ``vert`` keyword, which Matplotlib >=3.11 deprecates in favor of
+    ``orientation=``. There is no public ``sns.boxplot()`` argument that
+    avoids this internal call (fixed in later seaborn releases), so the
+    specific warning is filtered narrowly here instead of leaking into every
+    run's output.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r".*\bvert\b.*", category=MatplotlibDeprecationWarning)
+        yield
+
+
+@contextmanager
+def _suppress_seaborn_heatmap_warning():
+    """
+    Seaborn 0.13.x internally calls ``Colormap.set_bad()`` when rendering
+    ``sns.heatmap()``, which recent Matplotlib versions flag as a pending
+    deprecation. No public ``sns.heatmap()`` argument avoids this internal
+    call, so the specific warning is filtered narrowly here.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r".*set_bad.*", category=PendingDeprecationWarning)
+        yield
+
+
+def safe_plot(func):
+    """Decorator to safely handle plot errors."""
+
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Plot generation failed: {e}")
+            return None
+        finally:
+            plt.close("all")
+
+    return wrapper
+
+
+@safe_plot
+def plot_histogram(series: pd.Series, output_path: Path) -> bool:
+    """Plot histogram with KDE."""
+    valid = series.dropna()
+    if len(valid) < 2:
+        return False
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    if len(valid.unique()) > 1:
+        sns.histplot(valid, kde=True, ax=ax, bins=30)
+    else:
+        ax.hist(valid, bins=1)
+    ax.set_title(f"Distribución: {series.name}")
+    ax.set_xlabel(series.name)
+    ax.set_ylabel("Frecuencia")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
+@safe_plot
+def plot_boxplot(series: pd.Series, output_path: Path) -> bool:
+    """Plot boxplot."""
+    valid = series.dropna()
+    if len(valid) < 2:
+        return False
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    with _suppress_seaborn_boxplot_warning():
+        sns.boxplot(y=valid, ax=ax)
+    ax.set_title(f"Boxplot: {series.name}")
+    ax.set_ylabel(series.name)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
+@safe_plot
+def plot_categorical(series: pd.Series, output_path: Path, top_n: int = 20) -> bool:
+    """Plot categorical bar chart (top N + Others)."""
+    valid = series.dropna()
+    if len(valid) == 0:
+        return False
+
+    counts = valid.value_counts()
+    if len(counts) > top_n:
+        top_counts = counts.iloc[:top_n]
+        other_count = counts.iloc[top_n:].sum()
+        top_counts["Otros"] = other_count
+        counts = top_counts
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    counts.plot(kind="bar", ax=ax)
+    ax.set_title(f"Categorías: {series.name}")
+    ax.set_xlabel(series.name)
+    ax.set_ylabel("Frecuencia")
+    ax.tick_params(axis="x", rotation=45)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
+@safe_plot
+def plot_correlation_heatmap(corr_matrix: pd.DataFrame, output_path: Path, max_size: int = 30) -> bool:
+    """Plot correlation heatmap."""
+    if corr_matrix.empty or corr_matrix.shape[0] < 2:
+        return False
+
+    # Limit size for readability
+    if corr_matrix.shape[0] > max_size:
+        corr_matrix = corr_matrix.iloc[:max_size, :max_size]
+
+    fig, ax = plt.subplots(figsize=(12, 10))
+    with _suppress_seaborn_heatmap_warning():
+        sns.heatmap(
+            corr_matrix, annot=False, cmap="coolwarm", center=0, ax=ax, square=True, cbar_kws={"label": "Correlación"}
+        )
+    ax.set_title("Matriz de Correlación Pearson")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
+@safe_plot
+def plot_missing_matrix(df: pd.DataFrame, output_path: Path) -> bool:
+    """Plot missing value heatmap."""
+    if df.empty:
+        return False
+
+    # Sample if too large
+    if len(df) > 500:
+        df = df.sample(500, random_state=42)
+
+    missing_matrix = df.isnull().astype(int)
+    fig, ax = plt.subplots(figsize=(14, 8))
+    with _suppress_seaborn_heatmap_warning():
+        sns.heatmap(missing_matrix, cbar=True, ax=ax, yticklabels=False, cbar_kws={"label": "Faltante (1=sí)"})
+    ax.set_title("Mapa de Valores Faltantes")
+    ax.set_xlabel("Columnas")
+    ax.set_ylabel("Filas (muestra)")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
+@safe_plot
+def plot_scatter(x: pd.Series, y: pd.Series, output_path: Path, sample_size: int = 1000) -> bool:
+    """Plot scatter plot."""
+    valid = pd.DataFrame({"x": x, "y": y}).dropna()
+    if len(valid) < 2:
+        return False
+
+    # Sample if large
+    if len(valid) > sample_size:
+        valid = valid.sample(sample_size, random_state=42)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.scatter(valid["x"], valid["y"], alpha=0.6, s=20)
+    ax.set_title(f"Scatter: {x.name} vs {y.name}")
+    ax.set_xlabel(x.name)
+    ax.set_ylabel(y.name)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
+@safe_plot
+def plot_time_series(series: pd.Series, output_path: Path) -> bool:
+    """Plot time series."""
+    valid = series.dropna()
+    if len(valid) < 2:
+        return False
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+    ax.plot(valid.index, valid.values, linewidth=1)
+    ax.set_title(f"Serie Temporal: {series.name}")
+    ax.set_xlabel("Tiempo")
+    ax.set_ylabel(series.name)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
+@safe_plot
+def plot_target_distribution(series: pd.Series, output_path: Path) -> bool:
+    """Plot target variable distribution."""
+    valid = series.dropna()
+    if len(valid) == 0:
+        return False
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    if pd.api.types.is_numeric_dtype(series) and len(valid.unique()) > 20:
+        # Continuous target: histogram
+        sns.histplot(valid, kde=True, ax=ax, bins=30)
+    else:
+        # Categorical or discrete target: bar chart
+        counts = valid.value_counts()
+        counts.plot(kind="bar", ax=ax)
+        ax.tick_params(axis="x", rotation=45)
+
+    ax.set_title(f"Distribución del Target: {series.name}")
+    ax.set_xlabel(series.name)
+    ax.set_ylabel("Frecuencia")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
+@safe_plot
+def plot_target_vs_feature(
+    feature: pd.Series, target: pd.Series, output_path: Path, feature_type: str, target_type: str
+) -> bool:
+    """Plot relationship between feature and target."""
+    valid = pd.DataFrame({"feature": feature, "target": target}).dropna()
+    if len(valid) < 2:
+        return False
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    if target_type == "classification":
+        if feature_type == "numeric":
+            # Boxplot: target vs feature
+            with _suppress_seaborn_boxplot_warning():
+                sns.boxplot(data=valid, x="target", y="feature", ax=ax)
+        else:
+            # Grouped bar chart
+            ct = pd.crosstab(valid["feature"], valid["target"])
+            ct.plot(kind="bar", ax=ax)
+            ax.tick_params(axis="x", rotation=45)
+            ax.legend(title="Target")
+    else:
+        # Regression target
+        if feature_type == "numeric":
+            # Scatter plot
+            ax.scatter(valid["feature"], valid["target"], alpha=0.6, s=20)
+        else:
+            # Boxplot
+            with _suppress_seaborn_boxplot_warning():
+                sns.boxplot(data=valid, x="feature", y="target", ax=ax)
+            ax.tick_params(axis="x", rotation=45)
+
+    ax.set_title(f"{feature.name} vs {target.name}")
+    ax.set_xlabel(feature.name)
+    ax.set_ylabel(target.name)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
+def generate_all_visualizations(
+    df: pd.DataFrame,
+    column_types: dict[str, str],
+    numeric_cols: list[str],
+    categorical_cols: list[str],
+    datetime_cols: list[str],
+    text_cols: list[str],
+    corr_matrix: pd.DataFrame,
+    output_dir: Path,
+    config_viz,
+) -> dict[str, list[str]]:
+    """
+    Generate all standard visualizations.
+
+    Returns:
+        Dictionary mapping plot type to list of generated file paths
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    plot_files = {}
+
+    # Numeric columns: histograms and boxplots
+    logger.info(f"Generating {len(numeric_cols)} histograms...")
+    hist_files = []
+    for col in numeric_cols[: config_viz.max_histograms]:
+        output_file = output_dir / f"histogram_{col.replace('/', '_')}.png"
+        if plot_histogram(df[col], output_file):
+            hist_files.append(str(output_file))
+    plot_files["histograms"] = hist_files
+
+    logger.info(f"Generating {len(numeric_cols)} boxplots...")
+    box_files = []
+    for col in numeric_cols[: config_viz.max_boxplots]:
+        output_file = output_dir / f"boxplot_{col.replace('/', '_')}.png"
+        if plot_boxplot(df[col], output_file):
+            box_files.append(str(output_file))
+    plot_files["boxplots"] = box_files
+
+    # Categorical columns
+    logger.info(f"Generating {len(categorical_cols)} bar charts...")
+    cat_files = []
+    for col in categorical_cols[: config_viz.max_histograms]:
+        output_file = output_dir / f"categorical_{col.replace('/', '_')}.png"
+        if plot_categorical(df[col], output_file):
+            cat_files.append(str(output_file))
+    plot_files["categorical"] = cat_files
+
+    # Correlation heatmap
+    logger.info("Generating correlation heatmap...")
+    corr_file = output_dir / "correlation_heatmap.png"
+    if plot_correlation_heatmap(corr_matrix, corr_file, config_viz.max_correlation_heatmap_size):
+        plot_files["correlation"] = [str(corr_file)]
+    else:
+        plot_files["correlation"] = []
+
+    # Missing value matrix
+    logger.info("Generating missing value matrix...")
+    missing_file = output_dir / "missing_matrix.png"
+    if plot_missing_matrix(df, missing_file):
+        plot_files["missing"] = [str(missing_file)]
+    else:
+        plot_files["missing"] = []
+
+    # Scatter plots for top correlations
+    logger.info("Generating scatter plots...")
+    scatter_files = []
+    top_pairs = 0
+    for i, col1 in enumerate(numeric_cols):
+        if top_pairs >= config_viz.max_scatter_pairs:
+            break
+        for col2 in numeric_cols[i + 1 :]:
+            if top_pairs >= config_viz.max_scatter_pairs:
+                break
+            output_file = output_dir / f"scatter_{col1.replace('/', '_')}_vs_{col2.replace('/', '_')}.png"
+            if plot_scatter(df[col1], df[col2], output_file):
+                scatter_files.append(str(output_file))
+                top_pairs += 1
+
+    plot_files["scatter"] = scatter_files
+
+    # Time series plots
+    logger.info(f"Generating {len(datetime_cols)} time series plots...")
+    ts_files = []
+    for col in datetime_cols[:5]:  # Limit to 5
+        output_file = output_dir / f"timeseries_{col.replace('/', '_')}.png"
+        if plot_time_series(df[col], output_file):
+            ts_files.append(str(output_file))
+    plot_files["timeseries"] = ts_files
+
+    logger.info(f"Generated {sum(len(v) for v in plot_files.values())} visualizations")
+    return plot_files

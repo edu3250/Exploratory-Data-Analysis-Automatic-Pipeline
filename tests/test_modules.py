@@ -1,0 +1,627 @@
+"""
+Unit tests for EDA Pipeline modules.
+"""
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from eda_pipeline.config import (
+    ColumnTypeConfig,
+    Config,
+    ConfigError,
+    create_default_config_file,
+    load_config_file,
+    merge_configs,
+)
+from eda_pipeline.data_loader import (
+    detect_decimal_separator,
+    detect_delimiter,
+    detect_encoding,
+    detect_file_format,
+    discover_batch_files,
+    list_excel_sheets,
+    load_batch,
+    load_data,
+)
+from eda_pipeline.data_quality import analyze_data_quality, analyze_duplicates
+from eda_pipeline.html_report import overall_missing_pct
+from eda_pipeline.outlier_detection import detect_outliers_iqr, detect_outliers_mad
+from eda_pipeline.relationships import correlation_ratio, cramers_v, pearson_correlation
+from eda_pipeline.target_analysis import analyze_class_balance
+from eda_pipeline.type_inference import (
+    apply_column_type_overrides,
+    infer_all_types,
+    infer_semantic_type,
+)
+from eda_pipeline.univariate_analysis import analyze_categorical, analyze_numeric
+
+
+class TestConfig:
+    """Test configuration system."""
+
+    def test_default_config(self):
+        config = Config()
+        assert config.output_dir == "reports"
+        assert config.strict_mode is False
+        assert config.verbose is False
+        assert config.decimal is None  # None means auto-detect
+
+    def test_language_key_deprecated_but_accepted(self):
+        """'language' is no longer a real setting, but old YAML files must not crash (with a warning)."""
+        with pytest.warns(DeprecationWarning):
+            config = Config.from_dict({"language": "es", "output_dir": "reports"})
+        assert not hasattr(config, "language")
+        assert config.output_dir == "reports"
+
+    def test_config_from_dict(self):
+        data = {"input_file": "test.csv", "target": {"target_column": "target_col"}, "output_dir": "my_reports"}
+        config = Config.from_dict(data)
+        assert config.input_file == "test.csv"
+        assert config.target.target_column == "target_col"
+        assert config.output_dir == "my_reports"
+
+    def test_create_config_file(self, tmp_output_dir):
+        config_path = tmp_output_dir / "config.yaml"
+        create_default_config_file(config_path)
+        assert config_path.exists()
+        loaded = load_config_file(config_path)
+        assert "column_types" in loaded
+        assert "data_quality" in loaded
+
+    def test_default_config_file_round_trips(self, tmp_output_dir):
+        """The generated default YAML must itself pass Config.from_dict validation."""
+        config_path = tmp_output_dir / "config.yaml"
+        create_default_config_file(config_path)
+        loaded = load_config_file(config_path)
+        config = Config.from_dict(loaded)
+        assert config.data_quality.missing_threshold == 0.95
+        assert config.target.class_imbalance_threshold == 0.8
+
+    def test_unknown_top_level_key_raises_config_error(self):
+        with pytest.raises(ConfigError, match="no_existe"):
+            Config.from_dict({"no_existe": 1})
+
+    def test_unknown_nested_key_raises_config_error(self):
+        with pytest.raises(ConfigError, match="no_existe"):
+            Config.from_dict({"data_quality": {"no_existe": 1}})
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"data_quality": {"missing_threshold": 1.5}},
+            {"data_quality": {"missing_threshold": 0}},
+            {"outliers": {"iqr_multiplier": -1}},
+            {"visualizations": {"max_histograms": 0}},
+            {"target": {"class_imbalance_threshold": 1.5}},
+            {"target": {"target_type": "bogus"}},
+            {"decimal": ";"},
+            {"sample_size": -5},
+        ],
+    )
+    def test_invalid_values_raise_config_error(self, overrides):
+        with pytest.raises(ConfigError):
+            Config.from_dict(overrides)
+
+    def test_merge_configs_precedence_defaults_lt_file_lt_cli(self):
+        """CLI overrides win over YAML, which wins over defaults; None CLI values never clobber YAML."""
+        base = Config()
+        file_config = {"output_dir": "from_yaml", "strict_mode": True}
+        cli_overrides = {"output_dir": None, "strict_mode": None}
+        merged = merge_configs(base, file_config, cli_overrides)
+        assert merged.output_dir == "from_yaml"
+        assert merged.strict_mode is True
+
+    def test_merge_configs_deep_merges_nested_target_section(self):
+        """A CLI --target must not wipe out a YAML-provided class_imbalance_threshold."""
+        base = Config()
+        file_config = {"target": {"class_imbalance_threshold": 0.65}}
+        cli_overrides = {"target": {"target_column": "y"}}
+        merged = merge_configs(base, file_config, cli_overrides)
+        assert merged.target.target_column == "y"
+        assert merged.target.class_imbalance_threshold == 0.65
+
+    def test_duplicate_threshold_and_batch_pattern_are_configurable(self):
+        config = Config.from_dict({"data_quality": {"duplicate_threshold": 0.2}, "batch_pattern": "*.csv"})
+        assert config.data_quality.duplicate_threshold == 0.2
+        assert config.batch_pattern == "*.csv"
+
+
+class TestDataLoader:
+    """Test data loading functionality."""
+
+    def test_load_csv(self, csv_file):
+        df = load_data(csv_file)
+        assert df is not None
+        assert len(df) > 0
+
+    def test_load_with_encoding(self, latin1_csv_file):
+        df = load_data(latin1_csv_file, encoding="latin-1", delimiter=";", decimal=",")
+        assert df is not None
+        assert "región" in df.columns
+
+    def test_sample_size_log_reports_original_length_not_sampled_length(self, csv_file, caplog):
+        """Bug #12: the log used to report len(df) AFTER sampling, i.e. the sample size itself."""
+        original_len = len(pd.read_csv(csv_file))
+        sample_size = 5
+        assert sample_size < original_len
+
+        with caplog.at_level("INFO", logger="eda_pipeline.data_loader"):
+            df = load_data(csv_file, sample_size=sample_size)
+
+        assert len(df) == sample_size
+        sample_logs = [r.message for r in caplog.records if "Sampled" in r.message]
+        assert len(sample_logs) == 1
+        assert f"Sampled {sample_size} rows from {original_len}" in sample_logs[0]
+
+    def test_detect_delimiter(self, latin1_csv_file):
+        delim = detect_delimiter(latin1_csv_file, "latin-1")
+        assert delim == ";"
+
+    def test_load_nonexistent_file(self):
+        with pytest.raises(FileNotFoundError):
+            load_data(Path("nonexistent.csv"))
+
+    # --- Bug #1: Excel without an explicit sheet must not crash -----------------------------
+
+    def test_load_excel_defaults_to_first_sheet(self, multi_sheet_excel_file):
+        """pd.read_excel(sheet_name=None) returns a dict of all sheets; we must default to the first."""
+        df = load_data(multi_sheet_excel_file)
+        assert isinstance(df, pd.DataFrame)
+        assert list(df.columns) == ["a"]
+        assert df["a"].tolist() == [1, 2, 3]
+
+    def test_load_excel_with_explicit_sheet_name(self, multi_sheet_excel_file):
+        df = load_data(multi_sheet_excel_file, excel_sheet="Segunda")
+        assert list(df.columns) == ["b"]
+
+    def test_load_excel_with_explicit_sheet_index(self, multi_sheet_excel_file):
+        df = load_data(multi_sheet_excel_file, excel_sheet=1)
+        assert list(df.columns) == ["b"]
+
+    # --- Bug #2: JSON arrays / nested cells must not crash -----------------------------------
+
+    def test_load_json_array_flattens_nested_records(self, json_array_file):
+        df = load_data(json_array_file)
+        assert "address.city" in df.columns
+        assert "address.zip" in df.columns
+        assert df.loc[0, "address.city"] == "X"
+
+    def test_load_json_array_stringifies_list_cells(self, json_array_file):
+        """A nested list cell must become a hashable JSON string, not crash value_counts/duplicated."""
+        df = load_data(json_array_file)
+        assert isinstance(df.loc[0, "tags"], str)
+        assert json.loads(df.loc[0, "tags"]) == ["a", "b"]
+        # These would raise TypeError: unhashable type: 'dict'/'list' before the fix.
+        df["tags"].value_counts()
+        df.duplicated().sum()
+
+    def test_load_jsonl_file(self, jsonl_file):
+        df = load_data(jsonl_file)
+        assert len(df) == 5
+        assert list(df.columns) == ["id", "value"]
+
+    # --- Bug #8: encoding/delimiter detection robustness -------------------------------------
+
+    def test_detect_encoding_handles_late_accent(self, late_accent_cp1252_file):
+        """A short 10 KB sample would see only ASCII and wrongly guess 'ascii'."""
+        encoding = detect_encoding(late_accent_cp1252_file)
+        raw = late_accent_cp1252_file.read_bytes()
+        text = raw.decode(encoding)  # must not raise
+        assert "José Muñoz Peña" in text
+
+    def test_detect_delimiter_ignores_spaces_in_free_text(self, freetext_spaces_csv_file):
+        assert detect_delimiter(freetext_spaces_csv_file, "utf-8") == ","
+
+    def test_detect_delimiter_prefers_semicolon_over_decimal_commas(self, semicolon_decimal_comma_csv_file):
+        assert detect_delimiter(semicolon_decimal_comma_csv_file, "utf-8") == ";"
+
+    # --- Bug #7: decimal separator auto-detection --------------------------------------------
+
+    def test_detect_decimal_separator_comma_with_semicolon_delimiter(self, semicolon_decimal_comma_csv_file):
+        assert detect_decimal_separator(semicolon_decimal_comma_csv_file, "utf-8", ";") == ","
+
+    def test_detect_decimal_separator_never_comma_when_delimiter_is_comma(self):
+        # Ambiguous by construction: comma can't be both delimiter and decimal separator.
+        assert detect_decimal_separator(Path("unused.csv"), "utf-8", ",") == "."
+
+    def test_load_data_latin1_matches_ecommerce_column_types(self, tmp_output_dir):
+        """Acceptance test for bug #7: auto-detected decimal must yield numeric (not text) columns."""
+        df = load_data(Path("data/raw/data_latin1.csv"))
+        assert df["amount_spent"].dtype.kind == "f" or str(df["amount_spent"].dtype) == "Float64"
+        assert str(df["is_churn"].dtype) in ("Float64", "boolean")
+
+    # --- Bug #3: batch file discovery ---------------------------------------------------------
+
+    def test_discover_batch_files_skips_hidden_and_unsupported(self, tmp_output_dir):
+        (tmp_output_dir / ".gitkeep").write_text("")
+        (tmp_output_dir / "notes.txt.bak").write_text("not supported")
+        (tmp_output_dir / "a.csv").write_text("x\n1\n")
+        (tmp_output_dir / "b.csv").write_text("x\n2\n")
+
+        files = discover_batch_files(tmp_output_dir)
+
+        names = {f.name for f in files}
+        assert names == {"a.csv", "b.csv"}
+
+    def test_discover_batch_files_honors_pattern(self, tmp_output_dir):
+        (tmp_output_dir / "a.csv").write_text("x\n1\n")
+        (tmp_output_dir / "b.json").write_text("[]")
+
+        files = discover_batch_files(tmp_output_dir, "*.csv")
+
+        assert [f.name for f in files] == ["a.csv"]
+
+    # --- Misc error paths / legacy helpers ----------------------------------------------------
+
+    def test_list_excel_sheets(self, multi_sheet_excel_file):
+        assert list_excel_sheets(multi_sheet_excel_file) == ["Primera", "Segunda"]
+
+    def test_detect_file_format_rejects_unsupported_extension(self, tmp_output_dir):
+        with pytest.raises(ValueError, match="Unsupported"):
+            detect_file_format(tmp_output_dir / "data.exe")
+
+    def test_load_data_rejects_unknown_explicit_format(self, csv_file):
+        with pytest.raises(ValueError, match="Unknown file format"):
+            load_data(csv_file, file_format="bogus")
+
+    def test_load_json_raises_on_totally_invalid_content(self, tmp_output_dir):
+        bad_json = tmp_output_dir / "bad.json"
+        bad_json.write_text("this is not json at all {{{", encoding="utf-8")
+        with pytest.raises(Exception):
+            load_data(bad_json)
+
+    def test_load_excel_raises_on_corrupt_file(self, tmp_output_dir):
+        fake_xlsx = tmp_output_dir / "fake.xlsx"
+        fake_xlsx.write_bytes(b"not a real xlsx file")
+        with pytest.raises(Exception):
+            load_data(fake_xlsx)
+
+    def test_detect_decimal_separator_missing_file_returns_dot(self):
+        assert detect_decimal_separator(Path("does_not_exist.csv"), "utf-8", ";") == "."
+
+    def test_load_batch_legacy_helper_loads_supported_files(self, tmp_output_dir, synthetic_dataset):
+        synthetic_dataset.to_csv(tmp_output_dir / "a.csv", index=False)
+        synthetic_dataset.head(5).to_csv(tmp_output_dir / "b.csv", index=False)
+
+        results = load_batch(tmp_output_dir)
+
+        assert set(results.keys()) == {"a", "b"}
+        assert len(results["b"]) == 5
+
+    def test_load_batch_legacy_helper_skips_failing_file(self, tmp_output_dir, synthetic_dataset):
+        synthetic_dataset.to_csv(tmp_output_dir / "good.csv", index=False)
+        (tmp_output_dir / "bad.parquet").write_bytes(b"not a real parquet file")
+
+        results = load_batch(tmp_output_dir)
+
+        assert "good" in results
+        assert "bad" not in results
+
+
+class TestTypeInference:
+    """Test semantic type inference."""
+
+    def test_numeric_continuous(self):
+        series = pd.Series(np.random.normal(0, 1, 100), name="numeric")
+        dtype = infer_semantic_type(series)
+        assert dtype == "numeric_continuous"
+
+    def test_numeric_discrete(self):
+        series = pd.Series(np.random.randint(1, 10, 100), name="discrete")
+        dtype = infer_semantic_type(series)
+        assert dtype == "numeric_discrete"
+
+    def test_categorical(self):
+        series = pd.Series(np.random.choice(["A", "B", "C"], 100), name="cat")
+        dtype = infer_semantic_type(series)
+        assert dtype == "categorical"
+
+    def test_boolean(self):
+        series = pd.Series(np.random.choice([True, False], 100), name="bool")
+        dtype = infer_semantic_type(series)
+        assert dtype == "boolean"
+
+    def test_datetime(self):
+        series = pd.to_datetime(pd.date_range("2020-01-01", periods=100))
+        dtype = infer_semantic_type(series)
+        assert dtype == "datetime"
+
+    def test_text(self):
+        series = pd.Series([f"Text {i} " * 10 for i in range(100)], name="text")
+        dtype = infer_semantic_type(series)
+        assert dtype == "text"
+
+    def test_constant(self):
+        series = pd.Series(["X"] * 100, name="const")
+        dtype = infer_semantic_type(series)
+        assert dtype == "constant"
+
+    def test_identifier(self):
+        series = pd.Series([f"ID{i:06d}" for i in range(100)], name="id")
+        dtype = infer_semantic_type(series)
+        assert dtype == "identifier"
+
+    # --- Bug #6: date inference must be precise and warning-free -----------------------------
+
+    def test_string_dates_iso_format_detected_without_warning(self, recwarn):
+        series = pd.Series(["2023-03-24", "2023-05-19", "2024-01-31"] * 10, dtype="str")
+        dtype = infer_semantic_type(series)
+        assert dtype == "datetime"
+        assert len(recwarn) == 0
+
+    def test_string_dates_day_first_detected(self, recwarn):
+        series = pd.Series(["24/03/2023", "19/05/2023", "31/01/2024"] * 10, dtype="str")
+        dtype = infer_semantic_type(series)
+        assert dtype == "datetime"
+        assert len(recwarn) == 0
+
+    def test_string_datetime_iso_with_millis_detected(self, recwarn):
+        series = pd.Series(["2023-01-01T00:00:00.000", "2023-01-01T01:00:00.000"] * 10, dtype="str")
+        assert infer_semantic_type(series) == "datetime"
+        assert len(recwarn) == 0
+
+    def test_comma_decimal_numeric_strings_not_misclassified_as_datetime(self, recwarn):
+        """Regression for the reported bug: amount_spent-like values must not become 'datetime'."""
+        series = pd.Series(["24,598029558215444", "111,13951165532036", "151,62979648890638"] * 10, dtype="str")
+        dtype = infer_semantic_type(series)
+        assert dtype != "datetime"
+        assert len(recwarn) == 0
+
+    # --- Bug #13: column_types overrides -----------------------------------------------------
+
+    def test_apply_column_type_overrides_coerces_numeric_and_reports_failures(self):
+        df = pd.DataFrame({"a": ["1", "2", "not_a_number"]})
+        types = infer_all_types(df)
+        overrides = ColumnTypeConfig(numeric=["a"])
+
+        new_df, result = apply_column_type_overrides(df, types, overrides)
+
+        assert result.column_types["a"] == "numeric_continuous"
+        assert pd.api.types.is_numeric_dtype(new_df["a"])
+        assert result.coercion_failures["a"] == 1
+        assert new_df["a"].isna().sum() == 1
+
+    def test_apply_column_type_overrides_coerces_datetime(self):
+        df = pd.DataFrame({"d": ["2020-01-01", "not_a_date"]})
+        types = infer_all_types(df)
+        overrides = ColumnTypeConfig(datetime=["d"])
+
+        new_df, result = apply_column_type_overrides(df, types, overrides)
+
+        assert result.column_types["d"] == "datetime"
+        assert pd.api.types.is_datetime64_any_dtype(new_df["d"])
+        assert result.coercion_failures["d"] == 1
+
+    def test_apply_column_type_overrides_datetime_prefers_day_first(self, recwarn):
+        """
+        Plain pd.to_datetime(errors="coerce") locks onto the first row's format and
+        would wrongly turn '15/03/2021' into NaT after inferring month-first from
+        '01/02/2020'. Only the genuinely invalid value should fail to convert.
+        """
+        df = pd.DataFrame({"d": ["01/02/2020", "15/03/2021", "28/04/2022", "not_a_date"]})
+        types = infer_all_types(df)
+        overrides = ColumnTypeConfig(datetime=["d"])
+
+        new_df, result = apply_column_type_overrides(df, types, overrides)
+
+        assert result.coercion_failures["d"] == 1
+        assert new_df["d"].iloc[0] == pd.Timestamp("2020-02-01")  # day-first: 01/02 -> Feb 1st
+        assert new_df["d"].iloc[1] == pd.Timestamp("2021-03-15")
+        assert len(recwarn) == 0
+
+    def test_apply_column_type_overrides_ignore_drops_column(self):
+        df = pd.DataFrame({"a": [1, 2, 3], "drop_me": ["x", "y", "z"]})
+        types = infer_all_types(df)
+        overrides = ColumnTypeConfig(ignore=["drop_me"])
+
+        new_df, result = apply_column_type_overrides(df, types, overrides)
+
+        assert "drop_me" not in new_df.columns
+        assert "drop_me" not in result.column_types
+        assert result.ignored_columns == ["drop_me"]
+
+    def test_apply_column_type_overrides_categorical_and_text_relabel(self):
+        df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
+        types = infer_all_types(df)
+        overrides = ColumnTypeConfig(categorical=["a"], text=["b"])
+
+        _, result = apply_column_type_overrides(df, types, overrides)
+
+        assert result.column_types["a"] == "categorical"
+        assert result.column_types["b"] == "text"
+
+    def test_apply_column_type_overrides_reports_unknown_columns(self):
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        types = infer_all_types(df)
+        overrides = ColumnTypeConfig(numeric=["does_not_exist"])
+
+        _, result = apply_column_type_overrides(df, types, overrides)
+
+        assert result.unknown_columns == ["does_not_exist"]
+
+
+class TestDataQuality:
+    """Test data quality analysis."""
+
+    def test_missing_values(self, synthetic_dataset):
+        report = analyze_data_quality(synthetic_dataset)
+        assert report.shape == synthetic_dataset.shape
+        assert report.missing_per_column is not None
+        assert "nullable_col" in report.missing_per_column
+
+    def test_duplicates(self, synthetic_dataset):
+        report = analyze_data_quality(synthetic_dataset)
+        # The fixture appends exactly 10 exact-duplicate rows (see conftest.py).
+        assert report.duplicates == 10
+        assert len(report.duplicate_rows) == 20  # 10 originals + their 10 copies
+
+    def test_constant_columns(self, synthetic_dataset):
+        report = analyze_data_quality(synthetic_dataset)
+        assert "constant" in report.constant_columns
+
+    def test_quasi_constant(self, synthetic_dataset):
+        report = analyze_data_quality(synthetic_dataset)
+        assert "quasi_constant" in report.quasi_constant_columns
+
+    def test_high_cardinality(self, synthetic_dataset):
+        report = analyze_data_quality(synthetic_dataset)
+        assert "high_cardinality" in report.high_cardinality_columns
+
+    def test_alerts_generated(self, synthetic_dataset):
+        report = analyze_data_quality(synthetic_dataset)
+        assert len(report.alerts) > 0
+
+    # --- Bug #12: mixed-type duplicate sorting must not crash --------------------------------
+
+    def test_duplicates_with_mixed_type_object_column_does_not_raise(self):
+        """sort_values(by=...) used to raise TypeError comparing int/str in the same column."""
+        df = pd.DataFrame(
+            {
+                "mixed": [1, "a", 1, "a", 2.5, None],
+                "val": [1, 2, 1, 2, 3, 4],
+            }
+        )
+        n_dup, dup_rows, alerts = analyze_duplicates(df)
+        assert n_dup == 2
+        assert len(dup_rows) == 4
+        assert alerts[0].severity in ("low", "medium", "high")
+
+    # --- Bug #14: duplicate_threshold must control alert severity ----------------------------
+
+    @pytest.mark.parametrize(
+        "threshold,expected_severity",
+        [(0.1, "high"), (0.5, "medium")],
+    )
+    def test_duplicate_threshold_controls_severity(self, threshold, expected_severity):
+        # 3 duplicate rows out of 10 -> 30% duplicate ratio.
+        df = pd.DataFrame({"a": [1, 1, 1, 1, 2, 3, 4, 5, 6, 7]})
+        _, _, alerts = analyze_duplicates(df, duplicate_threshold=threshold)
+        assert alerts[0].severity == expected_severity
+
+
+class TestTargetAnalysis:
+    """Test target variable analysis (bug #20: imbalance rule)."""
+
+    def test_majority_share_above_threshold_is_imbalanced(self):
+        # 85% one class, 15% the other -> imbalanced at the default 0.8 threshold.
+        series = pd.Series([0] * 85 + [1] * 15)
+        balance = analyze_class_balance(series, imbalance_threshold=0.8)
+        assert balance.is_imbalanced is True
+
+    def test_majority_share_below_threshold_is_not_imbalanced(self):
+        # 70/30 split must NOT be flagged imbalanced at the default 0.8 threshold,
+        # unlike the old "smallest class < 10%" rule which ignored the threshold's meaning.
+        series = pd.Series([0] * 70 + [1] * 30)
+        balance = analyze_class_balance(series, imbalance_threshold=0.8)
+        assert balance.is_imbalanced is False
+
+    def test_three_classes_evenly_split_not_imbalanced(self):
+        series = pd.Series(["A"] * 34 + ["B"] * 33 + ["C"] * 33)
+        balance = analyze_class_balance(series, imbalance_threshold=0.8)
+        assert balance.is_imbalanced is False
+
+
+class TestUnivariateAnalysis:
+    """Test univariate analysis."""
+
+    def test_numeric_stats(self, synthetic_dataset):
+        stats = analyze_numeric(synthetic_dataset["age"])
+        assert stats.count > 0
+        assert not np.isnan(stats.mean)
+        assert not np.isnan(stats.median)
+        assert not np.isnan(stats.std)
+
+    def test_categorical_stats(self, synthetic_dataset):
+        stats = analyze_categorical(synthetic_dataset["gender"])
+        assert stats.count > 0
+        assert stats.nunique > 0
+        assert stats.mode in ["M", "F", "Otro"]
+
+    def test_empty_series(self):
+        empty = pd.Series([], dtype=float)
+        stats = analyze_numeric(empty)
+        assert stats.count == 0
+
+
+class TestOutlierDetection:
+    """Test outlier detection."""
+
+    def test_iqr_detection(self, synthetic_dataset):
+        info = detect_outliers_iqr(synthetic_dataset["age"])
+        assert info.method == "iqr"
+        assert info.n_outliers > 0  # Should detect outliers we added
+
+    def test_mad_detection(self, synthetic_dataset):
+        info = detect_outliers_mad(synthetic_dataset["age"])
+        assert info.method == "mad_zscore"
+        assert info.n_outliers >= 0
+
+    def test_empty_series(self):
+        empty = pd.Series([], dtype=float, name="empty")
+        info = detect_outliers_iqr(empty)
+        assert info.n_outliers == 0
+
+
+class TestRelationships:
+    """Test relationship analysis."""
+
+    def test_pearson_correlation(self):
+        x = pd.Series(np.random.normal(0, 1, 100))
+        y = x + np.random.normal(0, 0.1, 100)  # Highly correlated
+        corr, p = pearson_correlation(x, y)
+        assert corr > 0.9
+        assert p < 0.05
+
+    def test_cramers_v(self):
+        x = pd.Series(np.random.choice(["A", "B"], 100))
+        y = x  # Perfectly associated
+        v = cramers_v(x, y)
+        assert v > 0.9
+
+    def test_cramers_v_matches_bergsma_bias_correction(self):
+        # 2x2 table [[30, 20], [20, 30]], n=100 -> chi2=4 (no Yates) -> bias-corrected V ~= 0.1738.
+        x = pd.Series(["A"] * 50 + ["B"] * 50)
+        y = pd.Series(["A"] * 30 + ["B"] * 20 + ["A"] * 20 + ["B"] * 30)
+        assert cramers_v(x, y) == pytest.approx(0.1738, abs=1e-3)
+
+    def test_cramers_v_perfect_association_is_one(self):
+        x = pd.Series(["A", "B", "C", "D"] * 25)
+        assert cramers_v(x, x) == pytest.approx(1.0)
+
+    def test_cramers_v_id_like_column_on_tiny_sample_is_zero_without_warnings(self, recwarn):
+        # As many categories as rows: the old formula took the sqrt of a negative number here
+        # (RuntimeWarning) and silently turned the NaN into 0.
+        x = pd.Series(list("abcdefgh"))
+        y = pd.Series(["x", "y", "z", "w"] * 2)
+        assert cramers_v(x, y) == 0.0
+        assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]
+
+    def test_correlation_ratio(self):
+        cat = pd.Series(np.repeat(["A", "B", "C"], 100))
+        num = pd.Series(
+            np.concatenate([np.random.normal(0, 1, 100), np.random.normal(5, 1, 100), np.random.normal(10, 1, 100)])
+        )
+        eta = correlation_ratio(cat, num)
+        assert eta > 0.5  # Should be highly associated
+
+
+class TestHtmlReport:
+    """Test HTML report helpers."""
+
+    def test_overall_missing_pct_is_mean_of_column_percentages(self):
+        # Inputs are already percentages: 25% and 0% missing -> 12.5% of all cells (not 0.125).
+        assert overall_missing_pct({"a": 25.0, "b": 0.0}) == 12.5
+
+    def test_overall_missing_pct_rounds_to_two_decimals(self):
+        assert overall_missing_pct({"a": 100 / 3, "b": 0.0, "c": 0.0}) == 11.11
+
+    def test_overall_missing_pct_without_columns_is_zero(self):
+        assert overall_missing_pct({}) == 0.0
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
