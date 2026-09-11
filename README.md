@@ -454,6 +454,16 @@ D:\DataScience\Pipeline/
 └── IMPLEMENTATION_PLAN.md         # Plan de implementación (fases)
 ```
 
+### Datos y control de versiones
+
+Git no versiona ningún archivo dentro de `data/`, solo la estructura de carpetas (con `.gitkeep`),
+porque los datasets pueden contener información privada.
+
+**Guarda siempre tus datasets dentro de `data/`.** Fuera de esa carpeta los CSV, Excel, Parquet o
+JSON ya no se ignoran, para que los tests puedan incluir archivos de ejemplo.
+
+Los reportes (`reports/`) y los logs (`logs/`) tampoco se versionan.
+
 ## Extensión del Pipeline
 
 ### Agregar un nuevo análisis
