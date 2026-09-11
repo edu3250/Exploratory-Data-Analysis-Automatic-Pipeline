@@ -3,6 +3,7 @@ Integration tests for the complete EDA Pipeline.
 """
 
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -199,6 +200,48 @@ class TestBatchProcessing:
 
         assert set(results.keys()) == {"sales_csv", "sales_parquet"}
         assert all(r["success"] for r in results.values())
+
+    def test_batch_writes_every_report_under_one_run_folder(self, tmp_output_dir, synthetic_dataset):
+        """Eight files used to scatter eight timestamped folders across the output directory."""
+        data_dir = tmp_output_dir / "Vistara"
+        data_dir.mkdir()
+        out_dir = tmp_output_dir / "reports"
+        synthetic_dataset.to_csv(data_dir / "ventas.csv", index=False)
+        pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]}).to_csv(data_dir / "clientes.csv", index=False)
+
+        pipeline = _make_pipeline(input_folder=str(data_dir), output_dir=str(out_dir))
+        results = pipeline.run()
+
+        dirs = {name: Path(result["output_dir"]) for name, result in results.items()}
+        assert set(dirs) == {"ventas", "clientes"}
+
+        parents = {d.parent for d in dirs.values()}
+        assert len(parents) == 1  # one folder holds the whole run
+        batch_dir = parents.pop()
+        assert batch_dir.parent == out_dir
+        assert re.fullmatch(r"Vistara_batch_\d{8}_\d{6}", batch_dir.name)
+
+        # Inside it, one subfolder per dataset: the run folder already carries the timestamp.
+        assert sorted(p.name for p in batch_dir.iterdir()) == ["clientes", "ventas"]
+        assert (dirs["ventas"] / "report.html").exists()
+        assert (dirs["clientes"] / "summary.json").exists()
+
+    def test_single_file_keeps_its_own_timestamped_folder(self, tmp_output_dir, synthetic_dataset):
+        """Only batches are grouped; one file still writes reports/<dataset>_<timestamp>/."""
+        out_dir = tmp_output_dir / "reports"
+        csv_file = tmp_output_dir / "ventas.csv"
+        synthetic_dataset.to_csv(csv_file, index=False)
+
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(out_dir))
+        results = pipeline.run()
+
+        output_dir = Path(results["ventas"]["output_dir"])
+        assert output_dir.parent == out_dir
+        assert re.fullmatch(r"ventas_\d{8}_\d{6}", output_dir.name)
+
+    def test_batch_run_folder_name_slugifies_the_input_folder(self):
+        name = EDAPipeline._batch_run_folder_name(Path("data") / "power Bi", "20260911_162444")
+        assert name == "power_Bi_batch_20260911_162444"
 
     def test_batch_honors_pattern_option(self, tmp_output_dir, synthetic_dataset):
         data_dir = tmp_output_dir / "raw"

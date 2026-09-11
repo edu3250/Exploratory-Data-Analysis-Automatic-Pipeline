@@ -219,9 +219,12 @@ en columnas numéricas, el separador decimal `,` se detecta automáticamente sin
   --output-dir ./eda_reports
 ```
 
-Procesa todos los `.xlsx` en `./raw_data` generando reportes separados para cada uno.
+Procesa todos los `.xlsx` en `./raw_data`. Cada archivo tiene su propio reporte y todos quedan
+juntos en una única carpeta de la ejecución: `eda_reports/raw_data_batch_<timestamp>/<archivo>/`.
 
 ## Estructura de Salida
+
+Un solo archivo (`analyze-file`) deja una carpeta con su marca de tiempo:
 
 ```
 reports/
@@ -251,6 +254,27 @@ reports/
     ├── plots/
     └── tables/
 ```
+
+Un lote (`analyze-batch`) agrupa **todos** los reportes de esa ejecución en una sola carpeta,
+`<carpeta_de_entrada>_batch_<timestamp>`, con una subcarpeta por archivo. Las subcarpetas no llevan
+marca de tiempo propia, porque ya la lleva la carpeta del lote:
+
+```
+reports/
+└── Vistara_batch_20250910_143025/
+    ├── Customers/
+    │   ├── report.html
+    │   ├── summary.json
+    │   ├── plots/
+    │   └── tables/
+    ├── Order_Details/
+    │   └── ...
+    └── Sales_Receipts/
+        └── ...
+```
+
+Así, ocho archivos de entrada dejan **una** carpeta en `reports/` en vez de ocho, y dos ejecuciones
+del mismo lote no se mezclan. La ruta de la carpeta se muestra al terminar y queda en el log.
 
 En la sección «Calidad de Datos» del HTML, la tabla «Tipo y Valores Faltantes por Columna» indica
 para cada columna el tipo de dato con el que quedó almacenada (`int`, `float`, `texto`, `fecha`…,

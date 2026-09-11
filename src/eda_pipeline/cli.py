@@ -54,6 +54,9 @@ def _run_and_report(final_config: Config, verbose: bool) -> None:
     pipeline.setup()
     results = pipeline.run()
 
+    if pipeline.batch_output_dir is not None:
+        click.secho(f"📁 Carpeta del lote: {pipeline.batch_output_dir}", fg="cyan")
+
     if "error" in results and len(results) == 1:
         click.secho(f"Error: {results['error']}", fg="red")
         sys.exit(1)
