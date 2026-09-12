@@ -106,6 +106,11 @@ def _empty_outlier_report() -> OutlierReport:
     return OutlierReport(iqr_outliers={}, mad_outliers={}, multivariate_outliers=[], outlier_indices_union=set())
 
 
+def _timestamp() -> str:
+    """Timestamp used to name report folders."""
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
 class EDAPipeline:
     """Main EDA Pipeline."""
 
@@ -115,6 +120,8 @@ class EDAPipeline:
         self.correlation_id = generate_correlation_id()
         self.log_file = None
         self.results = {}
+        # On a batch run, the folder that holds every report of the run (None for a single file).
+        self.batch_output_dir = None
 
     def setup(self):
         """Initialize logging and output directories."""
@@ -172,13 +179,41 @@ class EDAPipeline:
         files = discover_batch_files(folder_path, self.config.batch_pattern)
         self.logger.info(f"Se encontraron {len(files)} archivo(s) para procesar en {folder_path}")
 
+        # One folder for the whole run: a folder of eight files used to scatter eight timestamped
+        # report folders across the output directory, mixed with those of every previous run.
+        self.batch_output_dir = Path(self.config.output_dir) / self._batch_run_folder_name(folder_path, _timestamp())
+        self.logger.info(f"Los reportes de este lote se guardarán en: {self.batch_output_dir}")
+
         stem_counts = Counter(f.stem for f in files)
         all_results = {}
         for file_path in files:
             dataset_name = self._unique_dataset_name(file_path, stem_counts)
-            all_results[dataset_name] = self._load_and_analyze(file_path, dataset_name)
+            all_results[dataset_name] = self._load_and_analyze(file_path, dataset_name, self.batch_output_dir)
 
         return all_results
+
+    @staticmethod
+    def _batch_run_folder_name(folder_path: Path, timestamp: str) -> str:
+        """
+        Name of the folder that holds every report of one batch run: `<input folder>_batch_<timestamp>`.
+
+        The input folder's name is slugified, so spaces and other characters that are awkward in a
+        path never leak into it ("power Bi" -> "power_Bi").
+        """
+        raw = folder_path.resolve().name
+        slug = "".join(char if (char.isalnum() or char in "-._") else "_" for char in raw).strip("._")
+        return f"{slug or 'datos'}_batch_{timestamp}"
+
+    def _dataset_output_dir(self, dataset_name: str, batch_dir: Path | None) -> Path:
+        """
+        Where one dataset's report goes.
+
+        In a batch, every report is a subfolder of the run's folder, which already carries the
+        timestamp. A single file keeps its own timestamped folder in the output directory.
+        """
+        if batch_dir is not None:
+            return batch_dir / dataset_name
+        return Path(self.config.output_dir) / f"{dataset_name}_{_timestamp()}"
 
     @staticmethod
     def _unique_dataset_name(file_path: Path, stem_counts: Counter) -> str:
@@ -188,8 +223,12 @@ class EDAPipeline:
             return f"{stem}_{file_path.suffix.lstrip('.').lower()}"
         return stem
 
-    def _load_and_analyze(self, file_path: Path, dataset_name: str) -> dict:
-        """Load a single file and, if that succeeds, run the full per-dataset analysis."""
+    def _load_and_analyze(self, file_path: Path, dataset_name: str, batch_dir: Path | None = None) -> dict:
+        """
+        Load a single file and, if that succeeds, run the full per-dataset analysis.
+
+        `batch_dir` is the run's folder when this file is part of a batch, and None for a single file.
+        """
         try:
             df = load_data(
                 file_path,
@@ -212,7 +251,7 @@ class EDAPipeline:
             # returning something unexpected, e.g. the old Excel dict-of-sheets bug,
             # would escape to the outer handler and abort the whole run).
             self.logger.info(f"Analyzing {dataset_name}: {df.shape[0]} rows × {df.shape[1]} columns")
-            return self._analyze_dataset(dataset_name, df)
+            return self._analyze_dataset(dataset_name, df, batch_dir)
         except TargetColumnNotFoundError as e:
             # A mistyped --target is a user error: show the message, not a traceback.
             if self.config.strict_mode:
@@ -250,7 +289,7 @@ class EDAPipeline:
             step_failures.append(step_name)
             return default
 
-    def _analyze_dataset(self, dataset_name: str, df: pd.DataFrame) -> dict:
+    def _analyze_dataset(self, dataset_name: str, df: pd.DataFrame, batch_dir: Path | None = None) -> dict:
         """Analyze a single dataset, isolating failures per analysis step (see _run_step)."""
         failed_steps: list[str] = []
 
@@ -355,7 +394,7 @@ class EDAPipeline:
         combined_alerts.sort(key=lambda a: (SEVERITY_ORDER.get(a.severity, 999), a.column or ""))
 
         self.logger.info("Generating visualizations...")
-        output_dir = Path(self.config.output_dir) / f"{dataset_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        output_dir = self._dataset_output_dir(dataset_name, batch_dir)
         plots_dir = output_dir / "plots"
 
         plot_files = (
