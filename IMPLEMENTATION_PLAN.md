@@ -191,3 +191,26 @@ Verified with real output:
 - Regenerating the eight `data/raw/Vistara` reports with the merged code cuts their alerts from 14 to 3, none about IDs: `customer_first_name` (free text), `year_id` (constant) and `transaction_time` (a time of day still read as a category). No step failed.
 
 Note: the alert counts above were first written as "16 of the 18", which are the totals across every dataset in `data/raw` (20 before the fix, 7 after), not the Vistara ones. PR #5 was merged before the correction landed, so this PR carries it.
+
+## Stage 10: One folder per batch run
+**Goal**: Analysing a folder of files must leave one report folder per run instead of one per file. The eight Vistara files scattered eight timestamped folders across `reports/`, mixed with those of every previous run; after two runs the output directory held sixteen siblings with nothing to say which run each belonged to.
+
+**Success Criteria**:
+- A batch writes `reports/<input folder>_batch_<timestamp>/<dataset>/`, one subfolder per file.
+- The run folder carries the timestamp and the per-dataset subfolders do not, so two runs of the same batch never mix.
+- The input folder's name is slugified, so a name like `power Bi` cannot leak awkward characters into the path.
+- A single file is unchanged: `reports/<dataset>_<timestamp>/`.
+- The CLI prints the run folder before the per-dataset results, and it is logged.
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (the first two failed before the change):
+- `tests/test_integration.py::TestBatchProcessing::test_batch_writes_every_report_under_one_run_folder` — one parent for the whole run, named `<folder>_batch_<timestamp>`, with one subfolder per dataset.
+- `tests/test_integration.py::TestBatchProcessing::test_batch_run_folder_name_slugifies_the_input_folder`.
+- `tests/test_integration.py::TestBatchProcessing::test_single_file_keeps_its_own_timestamped_folder` — a guard that the single-file layout is untouched (green before and after).
+
+**Status**: COMPLETE. PR #8 was merged on 2026-09-12 as `311b6b4`, and its branch was deleted.
+
+Verified with real output:
+- **150 tests passed**, 0 failed, 0 warnings (147 + 3 new).
+- `ruff check .` and `ruff format --check .` are clean.
+- The eight `data/raw/Vistara` reports, regenerated with the merged code, land in a single folder: `reports/Vistara_batch_20260911_212539/`, with one subfolder per file (`Customers/`, `Dates/`, ... `Sales_Receipts/`) and nothing loose beside them. Each report kept its content: no failed steps, every plot embedded, and the same 3 alerts as before.
