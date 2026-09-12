@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
 from jinja2 import Template
 
 from .type_inference import dtype_label, semantic_type_label
@@ -262,6 +263,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <li><a href="#resumen">Resumen Ejecutivo</a></li>
             <li><a href="#alertas">Alertas y Recomendaciones</a></li>
             <li><a href="#calidad">Calidad de Datos</a></li>
+            {% if preview_rows %}<li><a href="#muestra">Primeras Filas</a></li>{% endif %}
             <li><a href="#univariado">Análisis Univariado</a></li>
             <li><a href="#relaciones">Relaciones entre Variables</a></li>
             {% if outliers %}<li><a href="#outliers">Análisis de Outliers</a></li>{% endif %}
@@ -388,6 +390,26 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </ul>
         {% endif %}
     </section>
+
+    {% if preview_rows %}
+    <section id="muestra">
+        <h2>🧾 Primeras Filas</h2>
+        <p>Las primeras {{ preview_rows | length }} filas del dataset, tal como se leyeron. Los valores
+           faltantes aparecen como «—» y los textos muy largos se recortan.</p>
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>{% for col in preview_columns %}<th>{{ col | e }}</th>{% endfor %}</tr>
+                </thead>
+                <tbody>
+                    {% for row in preview_rows %}
+                    <tr>{% for cell in row %}<td>{{ cell | e }}</td>{% endfor %}</tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% endif %}
 
     <section id="univariado">
         <h2>📊 Análisis Univariado</h2>
@@ -647,6 +669,7 @@ def generate_html_report(
     failed_steps: Optional[list] = None,
     column_types: Optional[dict] = None,
     column_dtypes: Optional[dict] = None,
+    data_preview: Optional[pd.DataFrame] = None,
 ) -> str:
     """
     Generate HTML report with embedded base64 images.
@@ -656,6 +679,7 @@ def generate_html_report(
         failed_steps: Names of analysis steps that failed and were skipped (see pipeline._run_step).
         column_types: Inferred semantic type per column, shown in the data quality table.
         column_dtypes: Storage dtype per column (int64, float64, str, ...), shown next to it.
+        data_preview: The analysed DataFrame; its first rows open the report body.
 
     Returns:
         Path to generated HTML file
@@ -679,6 +703,8 @@ def generate_html_report(
         "missing_total": overall_missing_pct(data_quality.get("missing_per_column", {})),
         "duplicates": data_quality.get("duplicates", 0),
         "column_quality": column_quality_rows(data_quality.get("missing_per_column", {}), column_types, column_dtypes),
+        "preview_columns": [str(col) for col in data_preview.columns] if data_preview is not None else [],
+        "preview_rows": preview_rows(data_preview) if data_preview is not None else [],
         "constant_columns": data_quality.get("constant_columns", []),
         "quasi_constant_columns": data_quality.get("quasi_constant_columns", {}),
         "numeric_stats": numeric_stats,
@@ -705,6 +731,34 @@ def generate_html_report(
 
     logger.info(f"HTML report saved: {output_path}")
     return str(output_path)
+
+
+PREVIEW_ROWS = 10
+_PREVIEW_MAX_CHARS = 200
+
+
+def preview_rows(df: pd.DataFrame, limit: int = PREVIEW_ROWS) -> list[list[str]]:
+    """
+    The first `limit` rows as display text: missing values become a dash, long values are cut.
+
+    Cutting matters for free-text columns, where one cell can hold thousands of characters and
+    would stretch the table well past the page.
+    """
+    rows: list[list[str]] = []
+    for _, row in df.head(limit).iterrows():
+        cells = []
+        for value in row:
+            try:
+                missing = bool(pd.isna(value))
+            except (TypeError, ValueError):  # a list or dict cell is never "missing"
+                missing = False
+            if missing:
+                cells.append("—")
+                continue
+            text = str(value)
+            cells.append(text if len(text) <= _PREVIEW_MAX_CHARS else text[: _PREVIEW_MAX_CHARS - 1] + "…")
+        rows.append(cells)
+    return rows
 
 
 def column_quality_rows(

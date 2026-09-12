@@ -440,6 +440,29 @@ class TestOutputCompleteness:
         }
         assert expected.issubset({p.name for p in tables_dir.glob("*.csv")})
 
+    def test_report_shows_the_first_rows_before_the_univariate_section(self, tmp_output_dir):
+        """A preview of the data must sit ahead of «Análisis Univariado» in the report."""
+        n = 30
+        df = pd.DataFrame({"ciudad": [f"Ciudad {i % 3}" for i in range(n)], "monto": [100.0 + i for i in range(n)]})
+        csv_file = tmp_output_dir / "ventas.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        html = Path(results["ventas"]["html_report"]).read_text(encoding="utf-8")
+        assert "Primeras Filas" in html
+        assert '<li><a href="#muestra">' in html  # reachable from the table of contents
+
+        preview_at = html.index('<section id="muestra">')
+        univariate_at = html.index('<section id="univariado">')
+        assert preview_at < univariate_at
+
+        section = html[preview_at:univariate_at]
+        assert section.count("<tr>") == 11  # one header row plus ten data rows
+        assert "<th>ciudad</th>" in section
+        assert "<th>monto</th>" in section
+        assert "Ciudad 0" in section
+
     def test_quality_table_shows_how_each_column_was_classified(self, tmp_output_dir):
         """The «Calidad de Datos» table must show the dtype and the inferred category per column."""
         n = 120

@@ -471,6 +471,7 @@ class EDAPipeline:
             failed_steps=list(failed_steps),
             column_types=column_types,
             column_dtypes=column_dtypes,
+            data_preview=df,
             default=None,
         )
 

@@ -28,7 +28,7 @@ from eda_pipeline.data_loader import (
     load_data,
 )
 from eda_pipeline.data_quality import analyze_data_quality, analyze_duplicates
-from eda_pipeline.html_report import column_quality_rows, overall_missing_pct
+from eda_pipeline.html_report import column_quality_rows, overall_missing_pct, preview_rows
 from eda_pipeline.outlier_detection import detect_outliers_iqr, detect_outliers_mad
 from eda_pipeline.relationships import correlation_ratio, cramers_v, pearson_correlation
 from eda_pipeline.target_analysis import analyze_class_balance
@@ -711,6 +711,23 @@ class TestRelationships:
 
 class TestHtmlReport:
     """Test HTML report helpers."""
+
+    def test_preview_rows_limits_to_ten_and_returns_text(self):
+        df = pd.DataFrame({"a": range(25), "b": [f"v{i}" for i in range(25)]})
+        rows = preview_rows(df)
+        assert len(rows) == 10
+        assert rows[0] == ["0", "v0"]
+        assert all(isinstance(cell, str) for row in rows for cell in row)
+
+    def test_preview_rows_marks_missing_values_with_a_dash(self):
+        df = pd.DataFrame({"a": [1.0, None], "b": ["x", None]})
+        assert preview_rows(df) == [["1.0", "x"], ["—", "—"]]
+
+    def test_preview_rows_truncates_very_long_values(self):
+        # A free-text column must not blow the table up.
+        cell = preview_rows(pd.DataFrame({"nota": ["x" * 500]}))[0][0]
+        assert len(cell) < 500
+        assert cell.endswith("…")
 
     def test_overall_missing_pct_is_mean_of_column_percentages(self):
         # Inputs are already percentages: 25% and 0% missing -> 12.5% of all cells (not 0.125).
