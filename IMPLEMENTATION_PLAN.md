@@ -279,3 +279,25 @@ Verified with real output:
 - Both candidate rules were measured across the 17 datasets in `data/raw` before the code was written. A uniqueness rule flagged `mx/siniestros.monto_siniestro` (451 distinct amounts over 452 rows) as a key, with `valor_ultimo_avaluo` (0.98) and `monto_pagado` (0.95) just under the cut; the name rule produced no false positives.
 - Differential check over those 17 datasets: exactly 3 columns change type (`id`, `date_id`, `week_id`) and no alert changes (18 before, 18 after).
 - On the stroke report the plots drop from 25 to 20 — the five removed are `histogram_id`, `boxplot_id` and the three `scatter_id_vs_*` — and `id` leaves the VIF table.
+
+## Stage 14: The target against every categorical variable
+**Goal**: With a target, the report showed each categorical column's distribution on its own but nothing comparing them with the target. The user asked for grouped bar charts in that style, below «Distribuciones Categóricas», keeping the report's palette.
+
+**Success Criteria**:
+- With a classification target, a «Target vs Variables Categóricas» section follows «Distribuciones Categóricas», one grouped bar chart per categorical column, each bar labelled with its share of the chart's total.
+- The target is not compared against itself; a regression target, or one with more than 12 classes, gets no chart.
+- At most 9 categories plus «Otros» per chart, so no colour of the default cycle repeats; percentages are drawn only up to 24 bars.
+- Numeric target classes sort as numbers (2 before 10).
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (`test_without_a_target_there_are_no_grouped_bars` is a contract, green before and after; the rest failed before the code existed):
+- `tests/test_modules.py::TestTargetCategoricalBars`: 10 tests over the counts (target classes against categories, frequency order, incomplete rows dropped, «Otros», numeric class order, palette size) and the skip rules (single class, too many classes, constant feature), plus that the plot is written.
+- `tests/test_integration.py::TestOutputCompleteness::test_target_analysis_adds_grouped_bars_per_categorical`, `test_a_regression_target_gets_no_grouped_bars` and `test_without_a_target_there_are_no_grouped_bars`.
+
+**Status**: COMPLETE. PR #15 was merged on 2026-09-12 as `635e2de`, and its branch was deleted.
+
+Verified with real output:
+- **179 tests passed**, 0 failed, 0 warnings (166 + 13 new). Ruff clean.
+- On the stroke dataset with `--target stroke`, the section holds 7 charts (its 8 categorical columns minus the target) and the percentages match the reference charts the user brought: gender 55.83 / 39.28 / 0.02 against 2.76 / 2.11 / 0.00, smoking_status 35.26 / 29.30 / 15.95 / 14.62.
+- The regenerated stroke report (`reports/healthcare-dataset-stroke-data_20260912_154023`) carries the section with its 7 charts, 27 plots in all and no failed step.
+- The limits were measured across the 17 datasets in `data/raw` first. No dataset has more than 8 categorical columns; `tipo_empleo` (21 values) and `causa_incumplimiento` (28) exceed the category cap and fold into «Otros». Rendered against a nine-class target, `tipo_empleo` draws 99 bars whose labels overlap into noise, while 20 and 24 bars still read cleanly.
