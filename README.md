@@ -365,6 +365,11 @@ Detectados por:
 - **MAD**: z-score robusto `|x - mediana| / MAD > 3.0`
 - **Isolation Forest**: Anomalías multivariadas
 
+Cuando al menos la mitad de una columna tiene el mismo valor (por ejemplo, un descuento que es 0 en el 77 %
+de las ventas), el IQR y el MAD valen 0: el rango "normal" se reduce a ese único valor y cualquier otro
+saldría como atípico. En ese caso el método no se aplica a la columna; `tables/outlier_summary.csv` lo
+explica en la columna `nota` y el reporte lista las columnas sin IQR.
+
 ### Relaciones
 
 - **Numeric ↔ Numeric**: Correlación Pearson (con p-value)

@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from eda_pipeline.config import Config, TargetConfig
+from eda_pipeline.config import Config, OutlierConfig, TargetConfig
 from eda_pipeline.pipeline import EDAPipeline
 
 
@@ -439,6 +439,38 @@ class TestOutputCompleteness:
             "alerts.csv",
         }
         assert expected.issubset({p.name for p in tables_dir.glob("*.csv")})
+
+    def test_a_column_without_spread_is_not_reported_as_outliers(self, tmp_output_dir):
+        """IQR marked 34% of Order_Details as outliers: discount_pct is 0 on 77% of its rows."""
+        n = 400
+        tiers = [0.0] * 77 + [0.1] * 17 + [0.2] * 3 + [0.3] * 3
+        df = pd.DataFrame(
+            {
+                "discount_pct": [tiers[i % 100] for i in range(n)],
+                "unit_price": [100.0 + i % 50 for i in range(n)],
+            }
+        )
+        csv_file = tmp_output_dir / "pedidos.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(
+            input_file=str(csv_file),
+            output_dir=str(tmp_output_dir),
+            outliers=OutlierConfig(isolation_forest_enabled=False),  # it flags 10% by construction
+        )
+        results = pipeline.run()
+
+        result = results["pedidos"]
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        assert summary["outliers"]["total_outlier_rows"] == 0
+
+        table = pd.read_csv(Path(result["output_dir"]) / "tables" / "outlier_summary.csv")
+        iqr_row = table[(table["columna"] == "discount_pct") & (table["metodo"] == "iqr")].iloc[0]
+        assert iqr_row["n_outliers"] == 0
+        assert "IQR = 0" in iqr_row["nota"]
+
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        outliers_section = html[html.index('<section id="outliers">') :]
+        assert "discount_pct" in outliers_section[: outliers_section.index("</section>")]
 
     def test_report_shows_the_first_rows_before_the_univariate_section(self, tmp_output_dir):
         """A preview of the data must sit ahead of «Análisis Univariado» in the report."""

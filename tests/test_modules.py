@@ -764,6 +764,28 @@ class TestOutlierDetection:
         info = detect_outliers_iqr(empty)
         assert info.n_outliers == 0
 
+    @staticmethod
+    def _discounts() -> pd.Series:
+        # Like discount_pct on Vistara: no discount on 77% of the rows, then a few fixed tiers.
+        return pd.Series([0.0] * 77 + [0.1] * 17 + [0.2] * 3 + [0.3] * 3, name="discount_pct")
+
+    def test_iqr_without_spread_flags_nothing(self):
+        # Q1 = Q3 = 0, so the "normal" range was [0, 0] and every discount counted as an outlier.
+        info = detect_outliers_iqr(self._discounts())
+        assert info.n_outliers == 0
+        assert "IQR = 0" in info.note
+
+    def test_iqr_with_spread_still_flags_extremes(self):
+        series = pd.Series([10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 500.0], name="monto")
+        info = detect_outliers_iqr(series)
+        assert info.values == [500.0]
+        assert info.note == ""
+
+    def test_mad_without_spread_says_why_it_flags_nothing(self):
+        info = detect_outliers_mad(self._discounts())
+        assert info.n_outliers == 0
+        assert "MAD = 0" in info.note
+
 
 class TestRelationships:
     """Test relationship analysis."""

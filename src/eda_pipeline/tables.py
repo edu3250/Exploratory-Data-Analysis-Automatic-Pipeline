@@ -106,7 +106,7 @@ def _outlier_summary_table(outliers_report) -> pd.DataFrame:
         ("mad_zscore", outliers_report.mad_outliers),
     ):
         for col, info in info_map.items():
-            rows.append({"columna": col, "metodo": method_name, "n_outliers": info.n_outliers})
+            rows.append({"columna": col, "metodo": method_name, "n_outliers": info.n_outliers, "nota": info.note})
 
     if outliers_report.multivariate_outliers:
         # All entries share the same multivariate outlier set; one summary row is enough.
@@ -115,6 +115,7 @@ def _outlier_summary_table(outliers_report) -> pd.DataFrame:
                 "columna": "(multivariado)",
                 "metodo": "isolation_forest",
                 "n_outliers": outliers_report.multivariate_outliers[0].n_outliers,
+                "nota": "",
             }
         )
 

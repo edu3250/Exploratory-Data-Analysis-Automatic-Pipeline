@@ -531,6 +531,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <h2>🎯 Análisis de Outliers</h2>
         <p>Se detectaron outliers usando IQR, MAD (z-score robusto) e Isolation Forest.</p>
         <p><strong>Total de filas con al menos un outlier detectado:</strong> {{ outliers.outlier_indices_union | length }}</p>
+        {% set no_spread = outliers.iqr_outliers.values() | selectattr("note") | map(attribute="column") | list %}
+        {% if no_spread %}
+        <p><strong>IQR no aplicado:</strong> {{ no_spread | join(", ") }}. Al menos la mitad de sus valores son iguales,
+           así que el IQR vale 0 y cualquier otro valor saldría como atípico.</p>
+        {% endif %}
     </section>
     {% endif %}
 

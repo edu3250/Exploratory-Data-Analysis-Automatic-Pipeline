@@ -21,6 +21,16 @@ class OutlierInfo:
     n_outliers: int
     outlier_indices: list[int]
     values: list[float]
+    note: str = ""  # why the method could not be applied, when it could not
+
+
+# When at least half of a column holds one value, IQR (and MAD) measure no spread at all. The
+# "normal" range then shrinks to that single value and every other value becomes an outlier: on
+# Vistara, every discount of discount_pct (0 on 77% of the rows) did. The same happened to waste and
+# waste_pct in Inventory and prima_cedida in the mortgage data. There is nothing to scale against,
+# so the method is not applied and the report says why.
+NO_SPREAD_NOTE_IQR = "Sin dispersión (IQR = 0): al menos la mitad de los valores son iguales"
+NO_SPREAD_NOTE_MAD = "Sin dispersión (MAD = 0): al menos la mitad de los valores son iguales"
 
 
 def detect_outliers_iqr(series: pd.Series, multiplier: float = 1.5) -> OutlierInfo:
@@ -41,6 +51,15 @@ def detect_outliers_iqr(series: pd.Series, multiplier: float = 1.5) -> OutlierIn
     q25 = valid.quantile(0.25)
     q75 = valid.quantile(0.75)
     iqr = q75 - q25
+    if iqr == 0:
+        return OutlierInfo(
+            method="iqr",
+            column=series.name or "unknown",
+            n_outliers=0,
+            outlier_indices=[],
+            values=[],
+            note=NO_SPREAD_NOTE_IQR,
+        )
 
     lower_bound = q25 - multiplier * iqr
     upper_bound = q75 + multiplier * iqr
@@ -79,9 +98,13 @@ def detect_outliers_mad(series: pd.Series, z_threshold: float = 3.0) -> OutlierI
     mad = np.median(np.abs(valid - median))
 
     if mad == 0:
-        # No variation; all values are identical to median
         return OutlierInfo(
-            method="mad_zscore", column=series.name or "unknown", n_outliers=0, outlier_indices=[], values=[]
+            method="mad_zscore",
+            column=series.name or "unknown",
+            n_outliers=0,
+            outlier_indices=[],
+            values=[],
+            note=NO_SPREAD_NOTE_MAD,
         )
 
     # Modified z-score (0.6745 constant for normal distribution)
