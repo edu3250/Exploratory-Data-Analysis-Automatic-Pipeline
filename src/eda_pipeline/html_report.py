@@ -580,6 +580,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
         {% endif %}
 
+        {% if plots.association %}
+        <h3>Asociación entre Variables (incluye categóricas)</h3>
+        <p>Cada celda usa la medida que corresponde al par: Pearson entre numéricas (de -1 a 1, con
+           signo), Cramér's V entre categóricas y razón de correlación (eta) entre una categórica y
+           una numérica; estas dos van de 0 a 1 y no tienen signo.</p>
+        <div class="plot-container">
+            <img src="data:image/png;base64,{{ plots.association[0] }}" alt="Association Matrix">
+        </div>
+        {% endif %}
+
         {% if plots.missing %}
         <h3>Mapa de Valores Faltantes</h3>
         <div class="plot-container">

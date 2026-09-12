@@ -3,7 +3,7 @@ Relationship analysis: correlations, associations, multicollinearity detection.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -171,6 +171,53 @@ def compute_mixed_associations(
     return pairs
 
 
+ASSOCIATION_MAX_COLUMNS = 30
+
+
+def association_matrix(
+    df: pd.DataFrame,
+    numeric_cols: list[str],
+    categorical_cols: list[str],
+    max_columns: int = ASSOCIATION_MAX_COLUMNS,
+) -> pd.DataFrame:
+    """
+    Square matrix of associations covering numeric and categorical columns alike.
+
+    Every pair uses the measure that fits it: Pearson between two numbers (signed), Cramér's V
+    between two categories, and the correlation ratio (eta) between a category and a number.
+
+    Label-encoding the categories and running Pearson over everything, the usual shortcut, invents
+    an order the categories do not have: on the stroke dataset it turns the work_type/age
+    association (eta 0.68) into a misleading -0.36, a number that depends on how the five job
+    types happened to be numbered.
+
+    Columns keep the order they have in the DataFrame, and the matrix is capped at `max_columns`
+    to bound the pairwise work on very wide datasets.
+    """
+    numeric = set(numeric_cols)
+    categorical = set(categorical_cols)
+    columns = [col for col in df.columns if col in numeric or col in categorical][:max_columns]
+    matrix = pd.DataFrame(np.eye(len(columns)), index=columns, columns=columns, dtype=float)
+
+    for position, col_a in enumerate(columns):
+        for col_b in columns[position + 1 :]:
+            a_is_numeric, b_is_numeric = col_a in numeric, col_b in numeric
+            if a_is_numeric and b_is_numeric:
+                value = pearson_correlation(df[col_a], df[col_b])[0]
+            elif not a_is_numeric and not b_is_numeric:
+                value = cramers_v(df[col_a], df[col_b])
+            elif a_is_numeric:
+                value = correlation_ratio(df[col_b], df[col_a])
+            else:
+                value = correlation_ratio(df[col_a], df[col_b])
+
+            value = 0.0 if value is None or pd.isna(value) else float(value)
+            matrix.loc[col_a, col_b] = value
+            matrix.loc[col_b, col_a] = value
+
+    return matrix
+
+
 def compute_correlation_matrix(df: pd.DataFrame, numeric_cols: list[str]) -> pd.DataFrame:
     """
     Compute numeric correlation matrix.
@@ -219,6 +266,8 @@ class RelationshipsReport:
     mixed_pairs: list[CorrelationPair]
     correlation_matrix: pd.DataFrame
     vif: dict[str, float]
+    # Numeric and categorical together; empty when the step could not build it.
+    association_matrix: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def analyze_relationships(
@@ -240,4 +289,5 @@ def analyze_relationships(
         mixed_pairs=mixed_pairs,
         correlation_matrix=corr_matrix,
         vif=vif,
+        association_matrix=association_matrix(df, numeric_cols, categorical_cols),
     )

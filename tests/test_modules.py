@@ -30,7 +30,7 @@ from eda_pipeline.data_loader import (
 from eda_pipeline.data_quality import analyze_data_quality, analyze_duplicates
 from eda_pipeline.html_report import column_quality_rows, overall_missing_pct, preview_rows
 from eda_pipeline.outlier_detection import detect_outliers_iqr, detect_outliers_mad
-from eda_pipeline.relationships import correlation_ratio, cramers_v, pearson_correlation
+from eda_pipeline.relationships import association_matrix, correlation_ratio, cramers_v, pearson_correlation
 from eda_pipeline.target_analysis import analyze_class_balance
 from eda_pipeline.type_inference import (
     apply_column_type_overrides,
@@ -770,6 +770,49 @@ class TestHtmlReport:
         assert column_quality_rows({"a": 1.0}) == [
             {"column": "a", "dtype": "—", "dtype_raw": "—", "type_label": "—", "missing_pct": 1.0}
         ]
+
+
+class TestAssociationMatrix:
+    """The heatmap must cover categorical variables, not only the numeric ones."""
+
+    @staticmethod
+    def _frame():
+        rng = np.random.default_rng(0)
+        n = 200
+        return pd.DataFrame(
+            {
+                "edad": rng.normal(40, 10, n),
+                "grupo": np.array(["a", "b", "c"])[rng.integers(0, 3, n)],
+                "gasto": rng.normal(100, 20, n),
+                "activo": rng.choice(["si", "no"], n),
+            }
+        )
+
+    def test_covers_numeric_and_categorical_columns_in_dataset_order(self):
+        df = self._frame()
+        matrix = association_matrix(df, ["edad", "gasto"], ["grupo", "activo"])
+        assert list(matrix.columns) == ["edad", "grupo", "gasto", "activo"]
+        assert list(matrix.index) == list(matrix.columns)
+        assert all(matrix.loc[col, col] == 1.0 for col in matrix.columns)
+
+    def test_uses_cramers_v_between_two_categoricals(self):
+        df = self._frame()
+        matrix = association_matrix(df, ["edad", "gasto"], ["grupo", "activo"])
+        assert matrix.loc["grupo", "activo"] == pytest.approx(cramers_v(df["grupo"], df["activo"]))
+
+    def test_uses_the_correlation_ratio_between_categorical_and_numeric(self):
+        df = self._frame()
+        matrix = association_matrix(df, ["edad", "gasto"], ["grupo", "activo"])
+        expected = correlation_ratio(df["grupo"], df["edad"])
+        assert matrix.loc["grupo", "edad"] == pytest.approx(expected)
+        assert matrix.loc["edad", "grupo"] == pytest.approx(expected)  # symmetric
+
+    def test_keeps_the_sign_of_pearson_between_numerics(self):
+        # Pearson carries a direction; Cramér's V and eta do not, and must never gain a fake one.
+        df = pd.DataFrame({"a": range(50), "b": [-x for x in range(50)], "g": ["x", "y"] * 25})
+        matrix = association_matrix(df, ["a", "b"], ["g"])
+        assert matrix.loc["a", "b"] == pytest.approx(-1.0)
+        assert matrix.loc["a", "g"] >= 0.0
 
 
 if __name__ == "__main__":
