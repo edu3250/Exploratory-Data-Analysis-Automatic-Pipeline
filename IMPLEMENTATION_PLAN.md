@@ -301,3 +301,51 @@ Verified with real output:
 - On the stroke dataset with `--target stroke`, the section holds 7 charts (its 8 categorical columns minus the target) and the percentages match the reference charts the user brought: gender 55.83 / 39.28 / 0.02 against 2.76 / 2.11 / 0.00, smoking_status 35.26 / 29.30 / 15.95 / 14.62.
 - The regenerated stroke report (`reports/healthcare-dataset-stroke-data_20260912_154023`) carries the section with its 7 charts, 27 plots in all and no failed step.
 - The limits were measured across the 17 datasets in `data/raw` first. No dataset has more than 8 categorical columns; `tipo_empleo` (21 values) and `causa_incumplimiento` (28) exceed the category cap and fold into «Otros». Rendered against a nine-class target, `tipo_empleo` draws 99 bars whose labels overlap into noise, while 20 and 24 bars still read cleanly.
+
+## Stage 15: Times of day as a temporal column
+**Goal**: `transaction_time` on Vistara's `Sales_Receipts` (`11:43:47`) was read as a category with 31 702 values: a high-cardinality alert, a bar chart of the 20 most repeated instants and a Cramér's V entry per pair. Dates were detected; a time of day without a date never was.
+
+**Success Criteria**:
+- A string column is a `time` («Hora del día») when more than 90% of a sample has the `HH:MM[:SS]` shape and parses as clock times, so `25:30` stays whatever it was.
+- The date formats are tried first, so a full timestamp stays a `datetime`.
+- A time column raises no high-cardinality alert. It gets a univariate table (distinct values, earliest and latest time, peak hour, missing) and one bar per hour of the day, and counts in `summary.json` as `univariate.time_columns`.
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (the two guards were green before and after; the rest failed before the change):
+- `tests/test_modules.py::TestTypeInference::test_time_of_day_is_a_time` and `test_hours_and_minutes_are_a_time`.
+- `tests/test_modules.py::TestDataQuality::test_high_cardinality_ignores_time_of_day_columns`.
+- `tests/test_modules.py::TestUnivariateAnalysis::test_time_of_day_stats`, `test_time_columns_get_their_own_stats` and `test_time_of_day_plot_is_written`.
+- `tests/test_integration.py::TestOutputCompleteness::test_time_of_day_columns_are_analysed_as_times`.
+- Guards: `test_values_shaped_like_times_that_no_clock_shows_stay_categorical` and `test_date_with_a_time_stays_datetime`.
+
+**Status**: COMPLETE. PR #17 was merged on 2026-09-12 as `7ff3a6c`, and its branch was deleted.
+
+Verified with real output:
+- **188 tests passed** on the branch, 0 failed, 0 warnings (179 + 9 new). Ruff clean.
+- Before the code, every text column holding a colon between digits was listed across the 17 datasets in `data/raw`: only `transaction_time` had the time shape (100%). `visit_date` holds colons too, but is already a datetime.
+- Differential check with and without the detection: exactly one column changes type (`transaction_time`, categorical → time) and exactly one alert goes away, its own (20 → 19).
+- On `Sales_Receipts` the report reads first 09:00:05, last 21:59:59, peak 18:00 with 28 985 rows, and the hour chart shows two peaks, 11–14 h and 18–21 h, that the category view hid.
+- The Vistara batch regenerated on `main` (`reports/Vistara_batch_20260912_161807`) confirms it: `transaction_time` is a time, the hour chart replaces the categorical one, and `Sales_Receipts` goes from 1 alert to 0. The two alerts left in the whole batch are real: `customer_first_name` (10 000 distinct names) and the constant `year_id`.
+- Known limit: a duration written the same way (`00:45:10`) cannot be told apart from a time of day.
+
+## Stage 16: IQR on a column without spread
+**Goal**: IQR marked 74 948 of the 219 432 rows of Vistara's `Order_Details` (34%) as outliers. `discount_pct` is 0 on 77% of them, so Q1 = Q3 = 0, the "normal" range shrank to `[0, 0]` and every discount became an outlier — 50 731 rows on that column alone.
+
+**Success Criteria**:
+- With IQR = 0 the column is not evaluated with IQR, the same guard MAD already had for MAD = 0.
+- A column with spread still has its extremes flagged.
+- Both methods say why in `OutlierInfo.note`; `tables/outlier_summary.csv` gains a `nota` column, and the report lists the columns IQR was not applied to, so a zero is not read as "no outliers found".
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (all four failed before the change):
+- `tests/test_modules.py::TestOutlierDetection::test_iqr_without_spread_flags_nothing` (23 flagged before), `test_iqr_with_spread_still_flags_extremes` and `test_mad_without_spread_says_why_it_flags_nothing`.
+- `tests/test_integration.py::TestOutputCompleteness::test_a_column_without_spread_is_not_reported_as_outliers` (92 of 400 rows before, 0 after).
+
+**Status**: COMPLETE. PR #18 was merged on 2026-09-12 as `8a7de7b`, and its branch was deleted.
+
+Verified with real output:
+- **183 tests passed** on the branch, 0 failed, 0 warnings (179 + 4 new). Ruff clean. Both branches together, before either was merged: **192 passed**, and they merged cleanly in either order. `main` after both merges: **192 passed**, ruff clean.
+- Before the code, every numeric column with IQR = 0 was listed across the 17 datasets: `discount_pct`, `waste`, `waste_pct`, `prima_cedida` and `valor_recuperado`. In all five, what IQR flagged was simply "any value other than the mode".
+- Share of rows with at least one outlier, before → after; only the datasets holding such a column change: `Order_Details` 34.2% → 18.3%, `credito_asegurado` 37.7% → 30.7%, `Inventory` 14.5% → 12.9%.
+- The same regenerated batch gives `Order_Details` 40 184 rows with an outlier (18.3%) and `Inventory` 7 570 (12.9%), with the `nota` in `outlier_summary.csv` and «IQR no aplicado» in the report. All 8 files match their CSV row counts and none has a failed step.
+- Still open, not changed here: Isolation Forest flags `isolation_forest_contamination` (0.1) of the rows by construction, about 10 points of what remains on every dataset.
