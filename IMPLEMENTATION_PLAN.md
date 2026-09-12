@@ -214,3 +214,25 @@ Verified with real output:
 - **150 tests passed**, 0 failed, 0 warnings (147 + 3 new).
 - `ruff check .` and `ruff format --check .` are clean.
 - The eight `data/raw/Vistara` reports, regenerated with the merged code, land in a single folder: `reports/Vistara_batch_20260911_212539/`, with one subfolder per file (`Customers/`, `Dates/`, ... `Sales_Receipts/`) and nothing loose beside them. Each report kept its content: no failed steps, every plot embedded, and the same 3 alerts as before.
+
+## Stage 11: The first rows of the data in the report
+**Goal**: The report went from «Calidad de Datos» straight to «Análisis Univariado» — statistics about the data, with no way to see the data itself, so checking whether a column had been read correctly meant opening the file separately. The user asked for a titled section with the first ten rows, placed before the univariate analysis.
+
+**Success Criteria**:
+- A «Primeras Filas» section sits before `<section id="univariado">` and is linked from the report's table of contents.
+- It shows the first ten rows as they were read.
+- Missing values render as a dash, and values longer than 200 characters are cut, so a single free-text cell cannot stretch the table past the page.
+- The table scrolls horizontally on its own when a dataset has many columns, and cells and headers are HTML-escaped — this is the one section that renders raw data values.
+- A dataset with fewer than ten rows, or none, still renders (the section is skipped when there is nothing to show).
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (all four failed before the change):
+- `tests/test_modules.py::TestHtmlReport::test_preview_rows_limits_to_ten_and_returns_text`, `test_preview_rows_marks_missing_values_with_a_dash` and `test_preview_rows_truncates_very_long_values`.
+- `tests/test_integration.py::TestOutputCompleteness::test_report_shows_the_first_rows_before_the_univariate_section` — end to end: linked from the table of contents, placed before the univariate section, and holding one header row plus ten data rows.
+
+**Status**: COMPLETE. PR #10 was merged on 2026-09-12 as `41cfce7`, and its branch was deleted.
+
+Verified with real output:
+- **154 tests passed**, 0 failed, 0 warnings (150 + 4 new).
+- `ruff check .` and `ruff format --check .` are clean.
+- The eight `data/raw/Vistara` reports, regenerated with the merged code, all carry the section: linked from the table of contents, placed before the univariate analysis, with ten data rows each — and five in `Sales_Outlet`, which only holds five rows. No step failed, and the alerts are the same 3 as before.
