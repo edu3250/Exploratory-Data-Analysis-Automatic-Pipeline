@@ -263,8 +263,10 @@ def analyze_text(series: pd.Series) -> TextStats:
         )
 
     nunique = series.nunique()
-    lengths = valid.str.len()
-    empty = (valid.str.len() == 0).sum()
+    # An identifier can be a number (`id`, `customer_id`), and a number still has a length.
+    text = valid.astype(str)
+    lengths = text.str.len()
+    empty = (lengths == 0).sum()
 
     return TextStats(
         count=count,

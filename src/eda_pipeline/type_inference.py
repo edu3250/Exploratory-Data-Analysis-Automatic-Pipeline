@@ -154,6 +154,21 @@ def _coerce_to_datetime(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, errors="coerce")
 
 
+# A number that names an entity instead of measuring it: "id", "customer_id", "id_cliente",
+# "orderId", "row_key". Deliberately narrow: "numero_creditos" in the Mexican data is a count, and
+# a column called "humid" is not a key.
+_IDENTIFIER_NAME_PATTERN = re.compile(r"^(?:id|uuid|guid)$|^id[_\-]|[_\-]id$|[_\-]key$", re.IGNORECASE)
+_CAMEL_CASE_ID_PATTERN = re.compile(r"[a-z0-9]Id$")
+
+
+def _has_identifier_name(name: object) -> bool:
+    """Does this column name mark it as a key (id, customer_id, id_cliente, orderId, row_key)?"""
+    if name is None:
+        return False
+    text = str(name).strip()
+    return bool(_IDENTIFIER_NAME_PATTERN.search(text) or _CAMEL_CASE_ID_PATTERN.search(text))
+
+
 # Above numeric_discrete_threshold, a string column is free text only if most of its values are
 # distinct; values that repeat are categories however long or numerous the labels are.
 FREE_TEXT_MIN_UNIQUE_RATIO = 0.5
@@ -200,7 +215,7 @@ def infer_semantic_type(
         - datetime: datetime or date string
         - text: free text, i.e. string values that rarely repeat
         - identifier: codes that name an entity (IDs), either unique per row or repeated as a
-          foreign key
+          foreign key; also whole numbers whose column name marks them as keys
         - constant: all values the same
     """
     # Remove nulls
@@ -229,11 +244,15 @@ def infer_semantic_type(
     # Check for numeric
     if pd.api.types.is_numeric_dtype(series):
         n_unique = valid.nunique()
-        # Numeric continuous vs discrete
-        if n_unique > numeric_discrete_threshold:
-            return "numeric_continuous"
-        else:
+        if n_unique <= numeric_discrete_threshold:
             return "numeric_discrete"
+        # A key stored as a number is not a measurement: analysing it yields a histogram of
+        # customer numbers, a VIF entry and scatter plots that mean nothing. Only whole numbers
+        # whose name marks them as keys qualify. Near-uniqueness alone would not do: on the
+        # Mexican data, monto_siniestro holds 451 distinct amounts over 452 rows.
+        if pd.api.types.is_integer_dtype(series) and _has_identifier_name(series.name):
+            return "identifier"
+        return "numeric_continuous"
 
     # String-like columns
     if pd.api.types.is_string_dtype(series):

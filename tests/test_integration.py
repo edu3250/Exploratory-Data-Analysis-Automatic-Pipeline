@@ -463,6 +463,35 @@ class TestOutputCompleteness:
         assert "<th>monto</th>" in section
         assert "Ciudad 0" in section
 
+    def test_numeric_id_columns_are_not_analysed_as_variables(self, tmp_output_dir):
+        """A key stored as a number used to get a histogram, a boxplot, VIF and scatter plots."""
+        n = 300
+        df = pd.DataFrame(
+            {
+                "id": range(1, n + 1),
+                "edad": [20 + i % 50 for i in range(n)],
+                "monto": [100.0 + i for i in range(n)],
+                "ciudad": [["a", "b", "c"][i % 3] for i in range(n)],
+            }
+        )
+        csv_file = tmp_output_dir / "datos.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["datos"]
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        # A numeric identifier reaches the text statistics, which must handle it without failing.
+        assert summary["failed_steps"] == []
+        assert summary["column_types"]["id"] == "identifier"
+        assert "id" not in summary["relationships"]["multicollinearity_vif"]
+
+        plots = {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
+        assert "histogram_id.png" not in plots
+        assert "boxplot_id.png" not in plots
+        assert {p for p in plots if p.startswith("scatter_")} == {"scatter_edad_vs_monto.png"}
+        assert "histogram_edad.png" in plots  # the real variables are untouched
+
     def test_report_heatmap_includes_categorical_variables(self, tmp_output_dir):
         """The heatmap covered only numeric columns, leaving every categorical one invisible."""
         n = 120

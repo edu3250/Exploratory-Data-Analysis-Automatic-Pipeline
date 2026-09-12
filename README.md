@@ -306,7 +306,11 @@ Por ejemplo, con `--output-dir reports` los logs quedan en `logs/`, junto a `rep
 - **text**: Texto libre: más de 20 valores distintos y más de la mitad de las filas con un valor
   diferente (ej: comentarios, descripciones, direcciones)
 - **identifier**: Códigos que nombran una entidad (IDs): alfanuméricos sin espacios, con letras y
-  dígitos (ej: `CUST-00001`, `ORD-2024-000001`). Se reconocen tanto los únicos por fila (clave
+  dígitos (ej: `CUST-00001`, `ORD-2024-000001`). También los **números enteros cuyo nombre de
+  columna los marca como clave** (`id`, `customer_id`, `id_cliente`, `orderId`, `row_key`), con
+  más valores distintos que el umbral de discretas; así `id` deja de recibir histograma,
+  correlaciones y gráficos de dispersión. Un importe con valores casi únicos, como
+  `monto_siniestro`, sigue siendo numérico: manda el nombre, no la unicidad. Se reconocen tanto los únicos por fila (clave
   primaria) como los que se repiten (clave foránea) en cuanto superan `cardinality_threshold`
   valores distintos. Por debajo de ese umbral un código sigue siendo una categoría útil para
   agrupar (ej: 40 `product_id`). Los identificadores nunca generan alertas de cardinalidad.
