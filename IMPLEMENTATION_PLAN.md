@@ -236,3 +236,46 @@ Verified with real output:
 - **154 tests passed**, 0 failed, 0 warnings (150 + 4 new).
 - `ruff check .` and `ruff format --check .` are clean.
 - The eight `data/raw/Vistara` reports, regenerated with the merged code, all carry the section: linked from the table of contents, placed before the univariate analysis, with ten data rows each — and five in `Sales_Outlet`, which only holds five rows. No step failed, and the alerts are the same 3 as before.
+
+## Stage 12: An association heatmap that includes the categorical columns
+**Goal**: The heatmap covered numeric columns only. On the stroke dataset that meant 4 variables of 12, while `gender`, `work_type`, `smoking_status`, `stroke` and the rest stayed invisible — even though the pipeline already computed Cramér's V and eta for them and listed those pairs in the relationship tables.
+
+**Success Criteria**:
+- A second heatmap covers numeric and categorical columns alike, each cell using the measure that fits its pair: Pearson (signed) between numbers, Cramér's V between categories, the correlation ratio (eta) between a category and a number.
+- Categories are never label-encoded, which would invent an order they do not have.
+- The matrix reuses `max_correlation_heatmap_size` as its cap, and the Pearson heatmap is left unchanged.
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (all five failed before the change):
+- `tests/test_modules.py::TestAssociationMatrix::test_covers_numeric_and_categorical_columns_in_dataset_order`, `test_uses_cramers_v_between_two_categoricals`, `test_uses_the_correlation_ratio_between_categorical_and_numeric` and `test_keeps_the_sign_of_pearson_between_numerics`.
+- `tests/test_integration.py::TestOutputCompleteness::test_report_heatmap_includes_categorical_variables`.
+
+**Status**: COMPLETE. PR #12 was merged on 2026-09-12 as `4306cdf`, and its branch was deleted.
+
+Verified with real output:
+- **159 tests passed**, 0 failed, 0 warnings (154 + 5 new). Ruff clean.
+- Measured against a label-encoded heatmap of the same dataset: identical on binary and numeric variables (age x ever_married 0.68, age x bmi 0.33, age x stroke 0.25), and different exactly where a variable has three or more unordered categories — work_type x age reads -0.36 label-encoded against eta 0.68, and bmi x work_type -0.30 against 0.45.
+- The regenerated stroke report carries the section, with 25 plots.
+
+## Stage 13: Identifiers stored as numbers
+**Goal**: `id` on the stroke dataset was analysed as a continuous variable — histogram, boxplot, VIF entry and three of the six scatter plots — and so was `date_id` on Vistara (VIF 1602 against `month_id`). Identifiers stored as text were already recognised; identifiers stored as numbers were not.
+
+**Success Criteria**:
+- A whole number whose column name marks it as a key (`id`, `customer_id`, `id_cliente`, `orderId`, `row_key`), with more distinct values than the discrete threshold, is an identifier.
+- Small numeric codes such as `month_id` (12 values) keep their categorical analysis.
+- An amount with almost-unique values stays numeric: the name decides, not uniqueness.
+- The text statistics survive a numeric identifier.
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (the first three failed before the change):
+- `tests/test_modules.py::TestTypeInference::test_numeric_primary_key_is_an_identifier` and `test_numeric_foreign_key_is_an_identifier`.
+- `tests/test_integration.py::TestOutputCompleteness::test_numeric_id_columns_are_not_analysed_as_variables` — no histogram, boxplot, scatter or VIF entry, and `failed_steps` empty.
+- Guards, green before and after: `test_amount_with_almost_unique_values_stays_numeric`, `test_small_numeric_code_stays_discrete`, `test_float_column_named_id_stays_numeric`, `test_name_merely_ending_in_id_is_not_an_identifier`.
+
+**Status**: COMPLETE. PR #13 was merged on 2026-09-12 as `8620665`, and its branch was deleted.
+
+Verified with real output:
+- **166 tests passed**, 0 failed, 0 warnings (159 + 7 new). Ruff clean.
+- Both candidate rules were measured across the 17 datasets in `data/raw` before the code was written. A uniqueness rule flagged `mx/siniestros.monto_siniestro` (451 distinct amounts over 452 rows) as a key, with `valor_ultimo_avaluo` (0.98) and `monto_pagado` (0.95) just under the cut; the name rule produced no false positives.
+- Differential check over those 17 datasets: exactly 3 columns change type (`id`, `date_id`, `week_id`) and no alert changes (18 before, 18 after).
+- On the stroke report the plots drop from 25 to 20 — the five removed are `histogram_id`, `boxplot_id` and the three `scatter_id_vs_*` — and `id` leaves the VIF table.
