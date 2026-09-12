@@ -37,10 +37,16 @@ from eda_pipeline.type_inference import (
     infer_all_types,
     infer_semantic_type,
 )
-from eda_pipeline.univariate_analysis import analyze_categorical, analyze_numeric
+from eda_pipeline.univariate_analysis import (
+    analyze_categorical,
+    analyze_numeric,
+    analyze_time_of_day,
+    analyze_univariate,
+)
 from eda_pipeline.visualizations import (
     TARGET_BAR_MAX_CLASSES,
     plot_target_vs_categorical,
+    plot_time_of_day,
     target_vs_categorical_counts,
 )
 
@@ -354,6 +360,29 @@ class TestTypeInference:
         dtype = infer_semantic_type(series)
         assert dtype == "datetime"
 
+    @staticmethod
+    def _clock_times(n: int = 300) -> pd.Series:
+        # n distinct times of day between 09:00 and 20:59, like transaction_time on Vistara.
+        return pd.Series(
+            [f"{9 + (i // 25) % 12:02d}:{i % 60:02d}:{(i * 7) % 60:02d}" for i in range(n)], name="hora", dtype="string"
+        )
+
+    def test_time_of_day_is_a_time(self):
+        # transaction_time ("11:43:47") was read as a category with 31702 values.
+        assert infer_semantic_type(self._clock_times()) == "time"
+
+    def test_hours_and_minutes_are_a_time(self):
+        series = pd.Series([f"{i % 24:02d}:{(i * 5) % 60:02d}" for i in range(200)], name="hora", dtype="string")
+        assert infer_semantic_type(series) == "time"
+
+    def test_values_shaped_like_times_that_no_clock_shows_stay_categorical(self):
+        series = pd.Series(["25:30", "31:45", "48:00"] * 40, name="marcador", dtype="string")
+        assert infer_semantic_type(series) == "categorical"
+
+    def test_date_with_a_time_stays_datetime(self):
+        series = pd.Series([f"2024-01-{1 + i % 28:02d} 11:43:47" for i in range(100)], name="momento", dtype="string")
+        assert infer_semantic_type(series) == "datetime"
+
     def test_text(self):
         series = pd.Series([f"Text {i} " * 10 for i in range(100)], name="text")
         dtype = infer_semantic_type(series)
@@ -598,6 +627,19 @@ class TestDataQuality:
         assert set(report.high_cardinality_columns) == {"municipio"}
         assert [a.column for a in report.alerts if "alta cardinalidad" in a.message] == ["municipio"]
 
+    def test_high_cardinality_ignores_time_of_day_columns(self):
+        # A time of day takes thousands of values by nature, like an amount or a date.
+        n = 300
+        df = pd.DataFrame(
+            {
+                "hora": [f"{9 + (i // 25) % 12:02d}:{i % 60:02d}:00" for i in range(n)],
+                "municipio": [f"Municipio {i % 150}" for i in range(n)],
+            }
+        )
+        column_types = {"hora": "time", "municipio": "categorical"}
+        report = analyze_data_quality(df, cardinality_threshold=100, column_types=column_types)
+        assert set(report.high_cardinality_columns) == {"municipio"}
+
     def test_high_cardinality_uses_semantic_types_for_dates_stored_as_text(self):
         dates = pd.date_range("2020-01-01", periods=300, freq="D").strftime("%Y-%m-%d")
         df = pd.DataFrame({"fecha": dates})
@@ -678,6 +720,30 @@ class TestUnivariateAnalysis:
         empty = pd.Series([], dtype=float)
         stats = analyze_numeric(empty)
         assert stats.count == 0
+
+    def test_time_of_day_stats(self):
+        series = pd.Series(["09:15:00", "18:30:10", "18:45:00", "21:05:59", None], name="hora", dtype="string")
+        stats = analyze_time_of_day(series)
+        assert stats.count == 4
+        assert stats.missing == 1
+        assert stats.earliest == "09:15:00"
+        assert stats.latest == "21:05:59"
+        assert stats.peak_hour == 18
+        assert len(stats.hour_counts) == 24  # every hour, the empty ones included
+        assert stats.hour_counts[18] == 2
+        assert stats.hour_counts[3] == 0
+
+    def test_time_columns_get_their_own_stats(self):
+        df = pd.DataFrame({"hora": pd.Series(["09:15:00", "18:30:10", "18:45:00"], dtype="string")})
+        report = analyze_univariate(df, {"hora": "time"})
+        assert "hora" in report.time_stats
+        assert "hora" not in report.categorical_stats
+
+    def test_time_of_day_plot_is_written(self, tmp_output_dir):
+        series = pd.Series(["09:15:00", "18:30:10", "18:45:00", "21:05:59"], name="hora", dtype="string")
+        output = tmp_output_dir / "time_of_day_hora.png"
+        assert plot_time_of_day(series, output) is True
+        assert output.exists()
 
 
 class TestOutlierDetection:

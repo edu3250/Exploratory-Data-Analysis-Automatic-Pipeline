@@ -26,6 +26,7 @@ from .type_inference import (
     get_datetime_columns,
     get_numeric_columns,
     get_text_columns,
+    get_time_columns,
     infer_all_types,
 )
 from .univariate_analysis import UnivariateReport, analyze_univariate
@@ -304,10 +305,11 @@ class EDAPipeline:
         categorical_cols = get_categorical_columns(column_types)
         text_cols = get_text_columns(column_types)
         datetime_cols = get_datetime_columns(column_types)
+        time_cols = get_time_columns(column_types)
 
         self.logger.info(
             f"  Numeric: {len(numeric_cols)}, Categorical: {len(categorical_cols)}, "
-            f"Text: {len(text_cols)}, Datetime: {len(datetime_cols)}"
+            f"Text: {len(text_cols)}, Datetime: {len(datetime_cols)}, Time: {len(time_cols)}"
         )
 
         # Target column existence: single-file mode fails fast; batch mode warns and continues.
@@ -414,6 +416,7 @@ class EDAPipeline:
                 assoc_matrix=relationships_report.association_matrix,
                 target_column=target_column,
                 target_type=target_report.target_type if target_report else None,
+                time_cols=time_cols,
                 default={},
             )
             or {}
@@ -475,6 +478,7 @@ class EDAPipeline:
             column_types=column_types,
             column_dtypes=column_dtypes,
             data_preview=df,
+            time_stats=univariate_report.time_stats,
             default=None,
         )
 
@@ -508,6 +512,7 @@ class EDAPipeline:
                 "numeric_columns": len(univariate_report.numeric_stats),
                 "categorical_columns": len(univariate_report.categorical_stats),
                 "datetime_columns": len(univariate_report.datetime_stats),
+                "time_columns": len(univariate_report.time_stats),
                 "text_columns": len(univariate_report.text_stats),
             },
             "relationships": {

@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from .type_inference import parse_time_of_day
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,6 +63,19 @@ class DatetimeStats:
 
 
 @dataclass
+class TimeOfDayStats:
+    """Statistics for a time-of-day column ("11:43:47"): when in the day its rows happen."""
+
+    count: int
+    missing: int
+    nunique: int
+    earliest: str
+    latest: str
+    peak_hour: Optional[int]
+    hour_counts: dict[int, int]  # all 24 hours, zero where nothing happens
+
+
+@dataclass
 class TextStats:
     """Statistics for text columns."""
 
@@ -81,6 +96,7 @@ class UnivariateReport:
     numeric_stats: dict[str, NumericStats] = field(default_factory=dict)
     categorical_stats: dict[str, CategoricalStats] = field(default_factory=dict)
     datetime_stats: dict[str, DatetimeStats] = field(default_factory=dict)
+    time_stats: dict[str, TimeOfDayStats] = field(default_factory=dict)
     text_stats: dict[str, TextStats] = field(default_factory=dict)
 
 
@@ -245,6 +261,29 @@ def analyze_datetime(series: pd.Series) -> DatetimeStats:
     )
 
 
+def analyze_time_of_day(series: pd.Series) -> TimeOfDayStats:
+    """Analyze a time-of-day column: its earliest and latest time and how the rows spread over the hours."""
+    missing = int(series.isna().sum())
+    parsed = parse_time_of_day(series.dropna()).dropna()
+    hour_counts = parsed.dt.hour.value_counts().reindex(range(24), fill_value=0)
+    hours = {int(hour): int(n) for hour, n in hour_counts.items()}
+
+    if parsed.empty:
+        return TimeOfDayStats(
+            count=0, missing=missing, nunique=0, earliest="", latest="", peak_hour=None, hour_counts=hours
+        )
+
+    return TimeOfDayStats(
+        count=len(parsed),
+        missing=missing,
+        nunique=int(series.nunique()),
+        earliest=parsed.min().strftime("%H:%M:%S"),
+        latest=parsed.max().strftime("%H:%M:%S"),
+        peak_hour=int(hour_counts.idxmax()),
+        hour_counts=hours,
+    )
+
+
 def analyze_text(series: pd.Series) -> TextStats:
     """Analyze a text column."""
     valid = series.dropna()
@@ -305,6 +344,8 @@ def analyze_univariate(df: pd.DataFrame, column_types: dict[str, str]) -> Univar
             report.categorical_stats[col] = analyze_categorical(series)
         elif dtype == "datetime":
             report.datetime_stats[col] = analyze_datetime(series)
+        elif dtype == "time":
+            report.time_stats[col] = analyze_time_of_day(series)
         elif dtype in ("text", "identifier"):
             report.text_stats[col] = analyze_text(series)
 

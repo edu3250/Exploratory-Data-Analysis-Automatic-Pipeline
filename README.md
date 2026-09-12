@@ -5,7 +5,7 @@ Un pipeline completo y automatizado para realizar análisis exploratorio de dato
 ## Características
 
 - **Carga de datos flexible**: CSV, TSV, Excel, Parquet, JSON/JSONL con detección automática de delimitador, codificación y separador decimal
-- **Inferencia de tipos semánticos**: Automático reconocimiento de numéricos, categóricos, datetime, texto, identificadores, constantes
+- **Inferencia de tipos semánticos**: Automático reconocimiento de numéricos, categóricos, datetime, horas del día, texto, identificadores, constantes
 - **Análisis de calidad de datos**: Valores faltantes, duplicados, columnas constantes, cardinalidad alta, tipos mixtos
 - **Análisis univariado**: Estadísticas descriptivas (media, mediana, desv.est., skewness, kurtosis), pruebas de normalidad, frecuencias
 - **Detección de outliers**: IQR, MAD (z-score robusto), Isolation Forest multivariado
@@ -303,6 +303,11 @@ Por ejemplo, con `--output-dir reports` los logs quedan en `logs/`, junto a `rep
   (ISO 8601, `dd/mm/aaaa`, `mm/dd/aaaa`, `dd-mm-aaaa`, con o sin hora) con una proporción alta
   de aciertos, priorizando día-primero en casos ambiguos. Los valores numéricos con separador
   decimal no se confunden con fechas.
+- **time**: Hora del día sin fecha (`11:43:47`, `09:30`). Se exige que más del 90 % de los
+  valores tengan esa forma y que un reloj pueda mostrarlos: `25:30` no es una hora. El reporte
+  muestra la primera y la última hora, la hora pico y un gráfico de barras por hora (00 a 23), en
+  vez de tratar cada instante como una categoría. Nunca genera alertas de cardinalidad. Una
+  duración escrita igual (`00:45:10`) no se distingue de una hora del día.
 - **text**: Texto libre: más de 20 valores distintos y más de la mitad de las filas con un valor
   diferente (ej: comentarios, descripciones, direcciones)
 - **identifier**: Códigos que nombran una entidad (IDs): alfanuméricos sin espacios, con letras y
