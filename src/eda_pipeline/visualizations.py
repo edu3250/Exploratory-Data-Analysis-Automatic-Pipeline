@@ -150,6 +150,42 @@ def plot_correlation_heatmap(corr_matrix: pd.DataFrame, output_path: Path, max_s
 
 
 @safe_plot
+def plot_association_heatmap(assoc_matrix: pd.DataFrame, output_path: Path, max_size: int = 30) -> bool:
+    """
+    Heatmap over numeric and categorical columns alike (see relationships.association_matrix).
+
+    Values are annotated while the matrix stays readable, because the numbers are the point here:
+    a 0.68 between a category and a number says far more than its colour does.
+    """
+    if assoc_matrix.empty or assoc_matrix.shape[0] < 2:
+        return False
+
+    if assoc_matrix.shape[0] > max_size:
+        assoc_matrix = assoc_matrix.iloc[:max_size, :max_size]
+
+    size = assoc_matrix.shape[0]
+    side = min(20, max(9, size))
+    fig, ax = plt.subplots(figsize=(side, side * 0.85))
+    with _suppress_seaborn_heatmap_warning():
+        sns.heatmap(
+            assoc_matrix,
+            annot=size <= 15,
+            fmt=".2f",
+            cmap="coolwarm",
+            center=0,
+            vmin=-1,
+            vmax=1,
+            ax=ax,
+            square=True,
+            cbar_kws={"label": "Asociación"},
+        )
+    ax.set_title("Asociación entre Variables (Pearson · Cramér's V · eta)")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
+@safe_plot
 def plot_missing_matrix(df: pd.DataFrame, output_path: Path) -> bool:
     """Plot missing value heatmap."""
     if df.empty:
@@ -286,6 +322,7 @@ def generate_all_visualizations(
     corr_matrix: pd.DataFrame,
     output_dir: Path,
     config_viz,
+    assoc_matrix: pd.DataFrame | None = None,
 ) -> dict[str, list[str]]:
     """
     Generate all standard visualizations.
@@ -329,6 +366,15 @@ def generate_all_visualizations(
         plot_files["correlation"] = [str(corr_file)]
     else:
         plot_files["correlation"] = []
+
+    # The same picture, but including the categorical columns.
+    assoc_file = output_dir / "association_heatmap.png"
+    if assoc_matrix is not None and plot_association_heatmap(
+        assoc_matrix, assoc_file, config_viz.max_correlation_heatmap_size
+    ):
+        plot_files["association"] = [str(assoc_file)]
+    else:
+        plot_files["association"] = []
 
     # Missing value matrix
     logger.info("Generating missing value matrix...")

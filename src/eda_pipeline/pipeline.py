@@ -411,6 +411,7 @@ class EDAPipeline:
                 relationships_report.correlation_matrix,
                 plots_dir,
                 self.config.visualizations,
+                assoc_matrix=relationships_report.association_matrix,
                 default={},
             )
             or {}

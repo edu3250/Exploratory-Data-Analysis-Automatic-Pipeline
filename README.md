@@ -236,6 +236,7 @@ reports/
 │   │   ├── boxplot_age.png
 │   │   ├── categorical_region.png
 │   │   ├── correlation_heatmap.png
+│   │   ├── association_heatmap.png
 │   │   ├── missing_matrix.png
 │   │   ├── scatter_age_vs_income.png
 │   │   ├── timeseries_date.png
@@ -361,6 +362,14 @@ Detectados por:
 - **Categorical ↔ Categorical**: Cramér's V (sesgada-corregida)
 - **Categorical ↔ Numeric**: Correlation ratio (eta)
 - **Multicolinealidad**: VIF (Variance Inflation Factor)
+
+El reporte incluye dos mapas de calor:
+
+- **Matriz de Correlación**: Pearson, solo entre columnas numéricas (de -1 a 1, con signo).
+- **Asociación entre Variables**: cubre también las categóricas. Cada celda usa la medida que
+  corresponde al par (Pearson, Cramér's V o eta) en vez de convertir las categorías a números.
+  Codificarlas como 0, 1, 2… inventa un orden que no existe: en el dataset de stroke ese atajo
+  convierte la asociación entre `work_type` y `age` (eta 0.68) en un engañoso -0.36.
 
 ### Target Analysis
 

@@ -463,6 +463,29 @@ class TestOutputCompleteness:
         assert "<th>monto</th>" in section
         assert "Ciudad 0" in section
 
+    def test_report_heatmap_includes_categorical_variables(self, tmp_output_dir):
+        """The heatmap covered only numeric columns, leaving every categorical one invisible."""
+        n = 120
+        df = pd.DataFrame(
+            {
+                "edad": [20 + i % 40 for i in range(n)],
+                "grupo": [["a", "b", "c"][i % 3] for i in range(n)],
+                "gasto": [100.0 + i for i in range(n)],
+                "activo": [["si", "no"][i % 2] for i in range(n)],
+            }
+        )
+        csv_file = tmp_output_dir / "datos.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["datos"]
+        plots = {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
+        assert "association_heatmap.png" in plots
+
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        assert "Asociación entre Variables" in html
+
     def test_quality_table_shows_how_each_column_was_classified(self, tmp_output_dir):
         """The «Calidad de Datos» table must show the dtype and the inferred category per column."""
         n = 120
