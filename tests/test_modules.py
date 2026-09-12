@@ -409,6 +409,34 @@ class TestTypeInference:
         labels = [f"Municipio {i}" for i in range(150)]
         assert infer_semantic_type(pd.Series(labels * 3, name="municipio")) == "categorical"
 
+    def test_numeric_primary_key_is_an_identifier(self):
+        # On the stroke dataset `id` held 5110 distinct values and drew a histogram, a boxplot,
+        # a VIF entry and 3 of the 6 scatter plots.
+        assert infer_semantic_type(pd.Series(range(1, 501), name="id")) == "identifier"
+
+    def test_numeric_foreign_key_is_an_identifier(self):
+        series = pd.Series([100 + (i % 60) for i in range(600)], name="customer_id")
+        assert infer_semantic_type(series) == "identifier"
+
+    def test_amount_with_almost_unique_values_stays_numeric(self):
+        # mx: monto_siniestro holds 451 distinct integers over 452 rows. Uniqueness alone would
+        # call it a key, but it is money, so the name is what decides.
+        series = pd.Series(range(10_000, 10_452), name="monto_siniestro")
+        assert infer_semantic_type(series) == "numeric_continuous"
+
+    def test_small_numeric_code_stays_discrete(self):
+        # month_id has 12 values: still useful as a grouping, so it keeps its categorical analysis.
+        series = pd.Series([(i % 12) + 1 for i in range(366)], name="month_id")
+        assert infer_semantic_type(series) == "numeric_discrete"
+
+    def test_float_column_named_id_stays_numeric(self):
+        series = pd.Series([float(i) + 0.5 for i in range(100)], name="id")
+        assert infer_semantic_type(series) == "numeric_continuous"
+
+    def test_name_merely_ending_in_id_is_not_an_identifier(self):
+        # "humid" ends in those two letters without being a key.
+        assert infer_semantic_type(pd.Series(range(1, 501), name="humid")) == "numeric_continuous"
+
     # --- Bug #6: date inference must be precise and warning-free -----------------------------
 
     def test_string_dates_iso_format_detected_without_warning(self, recwarn):
