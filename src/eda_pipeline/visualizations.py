@@ -15,6 +15,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib import MatplotlibDeprecationWarning
 
+from .type_inference import parse_time_of_day
+
 logger = logging.getLogger(__name__)
 
 # Style
@@ -247,6 +249,26 @@ def plot_time_series(series: pd.Series, output_path: Path) -> bool:
 
 
 @safe_plot
+def plot_time_of_day(series: pd.Series, output_path: Path) -> bool:
+    """One bar per hour of the day, so the empty hours show as clearly as the busy ones."""
+    hours = parse_time_of_day(series.dropna()).dropna().dt.hour
+    if hours.empty:
+        return False
+
+    counts = hours.value_counts().reindex(range(24), fill_value=0)
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.bar(counts.index, counts.values)
+    ax.set_xticks(range(24))
+    ax.set_xticklabels([f"{hour:02d}" for hour in range(24)])
+    ax.set_title(f"Hora del día: {series.name}")
+    ax.set_xlabel("Hora")
+    ax.set_ylabel("Frecuencia")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
+@safe_plot
 def plot_target_distribution(series: pd.Series, output_path: Path) -> bool:
     """Plot target variable distribution."""
     valid = series.dropna()
@@ -414,6 +436,7 @@ def generate_all_visualizations(
     assoc_matrix: pd.DataFrame | None = None,
     target_column: str | None = None,
     target_type: str | None = None,
+    time_cols: list[str] | None = None,
 ) -> dict[str, list[str]]:
     """
     Generate all standard visualizations.
@@ -511,6 +534,14 @@ def generate_all_visualizations(
         if plot_time_series(df[col], output_file):
             ts_files.append(str(output_file))
     plot_files["timeseries"] = ts_files
+
+    # Times of day: how the rows spread over the 24 hours
+    time_files = []
+    for col in (time_cols or [])[: config_viz.max_histograms]:
+        output_file = output_dir / f"time_of_day_{col.replace('/', '_')}.png"
+        if plot_time_of_day(df[col], output_file):
+            time_files.append(str(output_file))
+    plot_files["time_of_day"] = time_files
 
     logger.info(f"Generated {sum(len(v) for v in plot_files.values())} visualizations")
     return plot_files

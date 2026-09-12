@@ -530,6 +530,34 @@ class TestOutputCompleteness:
         html = Path(result["html_report"]).read_text(encoding="utf-8")
         assert "Target vs Variables Categóricas" not in html
 
+    def test_time_of_day_columns_are_analysed_as_times(self, tmp_output_dir):
+        """transaction_time on Vistara was a category with 31702 values: an alert and a useless bar chart."""
+        n = 300
+        df = pd.DataFrame(
+            {
+                "hora": [f"{9 + (i // 25) % 12:02d}:{i % 60:02d}:{(i * 7) % 60:02d}" for i in range(n)],
+                "monto": [100.0 + i for i in range(n)],
+            }
+        )
+        csv_file = tmp_output_dir / "ventas.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["ventas"]
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        assert summary["column_types"]["hora"] == "time"
+        assert summary["univariate"]["time_columns"] == 1
+        assert not any(alert["column"] == "hora" for alert in summary["alerts"])
+
+        plots = {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
+        assert "time_of_day_hora.png" in plots
+        assert "categorical_hora.png" not in plots
+
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        assert "Hora del día" in html  # how the quality table names the column's type
+        assert "Distribución por Hora del Día" in html
+
     def test_numeric_id_columns_are_not_analysed_as_variables(self, tmp_output_dir):
         """A key stored as a number used to get a histogram, a boxplot, VIF and scatter plots."""
         n = 300

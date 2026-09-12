@@ -16,7 +16,15 @@ logger = logging.getLogger(__name__)
 
 
 SemanticType = Literal[
-    "numeric_continuous", "numeric_discrete", "categorical", "boolean", "datetime", "text", "identifier", "constant"
+    "numeric_continuous",
+    "numeric_discrete",
+    "categorical",
+    "boolean",
+    "datetime",
+    "time",
+    "text",
+    "identifier",
+    "constant",
 ]
 
 # Spanish labels for the inferred types, shown per column in the HTML report and the CSV tables.
@@ -26,6 +34,7 @@ SEMANTIC_TYPE_LABELS: dict[str, str] = {
     "categorical": "Categórica",
     "boolean": "Booleana",
     "datetime": "Fecha/hora",
+    "time": "Hora del día",
     "text": "Texto libre",
     "identifier": "Identificador",
     "constant": "Constante",
@@ -154,6 +163,40 @@ def _coerce_to_datetime(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, errors="coerce")
 
 
+# A time of day with no date, such as "11:43:47" or "09:30". The date formats above are tried
+# first, so a full timestamp ("2024-01-01 11:43:47") stays a datetime.
+_TIME_LIKE_PATTERN = re.compile(r"^\s*\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?\s*$")
+_TIME_FORMATS: tuple[str, ...] = ("%H:%M:%S", "%H:%M", "%H:%M:%S.%f")
+
+
+def parse_time_of_day(series: pd.Series) -> pd.Series:
+    """
+    Parse "HH:MM[:SS]" text into timestamps on a placeholder date; only their clock part means anything.
+
+    Every format is tried and the results are combined, so a column mixing "09:30" and "09:30:15"
+    parses whole. Values no clock shows, like "25:30", become NaT.
+    """
+    text = series.astype("string").str.strip()
+    parsed = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+    for fmt in _TIME_FORMATS:
+        parsed = parsed.fillna(pd.to_datetime(text, format=fmt, errors="coerce"))
+    return parsed
+
+
+def _detect_time_series(valid: pd.Series, sample_size: int = 200) -> bool:
+    """Decide whether a string series is predominantly times of day, the way dates are detected."""
+    sample = valid.iloc[: min(sample_size, len(valid))]
+    if len(sample) == 0:
+        return False
+
+    time_like = sample.str.match(_TIME_LIKE_PATTERN).fillna(False).astype(bool)
+    if time_like.mean() <= _DATE_SUCCESS_RATIO_THRESHOLD:
+        return False
+
+    # The shape is not enough: "25:30" looks like a time, but no clock shows it.
+    return parse_time_of_day(sample[time_like]).notna().mean() > _DATE_SUCCESS_RATIO_THRESHOLD
+
+
 # A number that names an entity instead of measuring it: "id", "customer_id", "id_cliente",
 # "orderId", "row_key". Deliberately narrow: "numero_creditos" in the Mexican data is a count, and
 # a column called "humid" is not a key.
@@ -213,6 +256,7 @@ def infer_semantic_type(
         - categorical: string values that repeat (any label length)
         - boolean: True/False values
         - datetime: datetime or date string
+        - time: a time of day without a date ("11:43:47", "09:30")
         - text: free text, i.e. string values that rarely repeat
         - identifier: codes that name an entity (IDs), either unique per row or repeated as a
           foreign key; also whole numbers whose column name marks them as keys
@@ -240,6 +284,11 @@ def infer_semantic_type(
     # Try to parse as datetime (string columns only; see _detect_datetime_series)
     if pd.api.types.is_string_dtype(series) and _detect_datetime_series(valid):
         return "datetime"
+
+    # A time of day without a date: read as text, transaction_time on Vistara ("11:43:47") became a
+    # category with 31702 values, flagged as high cardinality and drawn as a bar chart of instants.
+    if pd.api.types.is_string_dtype(series) and _detect_time_series(valid):
+        return "time"
 
     # Check for numeric
     if pd.api.types.is_numeric_dtype(series):
@@ -325,6 +374,11 @@ def get_numeric_columns(type_map: dict[str, SemanticType]) -> list[str]:
 def get_categorical_columns(type_map: dict[str, SemanticType]) -> list[str]:
     """Get columns that are categorical or boolean."""
     return [col for col, t in type_map.items() if t in ("categorical", "boolean", "numeric_discrete")]
+
+
+def get_time_columns(type_map: dict[str, SemanticType]) -> list[str]:
+    """Get columns that hold a time of day without a date."""
+    return [col for col, t in type_map.items() if t == "time"]
 
 
 def get_text_columns(type_map: dict[str, SemanticType]) -> list[str]:

@@ -203,13 +203,14 @@ def analyze_constants(
     return constant_cols, quasi_constant_cols, alerts
 
 
-# Semantic types for which many distinct values are expected (amounts, balances, dates, IDs), not
+# Semantic types for which many distinct values are expected (amounts, dates, times of day, IDs), not
 # a data-quality problem. An identifier holds one value per entity, so many distinct values is
 # what an ID looks like rather than a finding worth reporting.
 CARDINALITY_EXEMPT_TYPES = {
     "numeric_continuous",
     "numeric_discrete",
     "datetime",
+    "time",
     "boolean",
     "constant",
     "identifier",

@@ -458,6 +458,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </tbody>
         </table>
         {% endif %}
+
+        {% if time_stats %}
+        <h3>Columnas de Hora del Día</h3>
+        <table>
+            <thead>
+                <tr><th>Columna</th><th>Únicos</th><th>Primera</th><th>Última</th><th>Hora pico</th><th>Nulos</th></tr>
+            </thead>
+            <tbody>
+                {% for col, stats in time_stats.items() %}
+                <tr>
+                    <td>{{ col }}</td>
+                    <td>{{ stats.nunique }}</td>
+                    <td>{{ stats.earliest }}</td>
+                    <td>{{ stats.latest }}</td>
+                    <td>{% if stats.peak_hour is not none %}{{ "%02d" | format(stats.peak_hour) }}:00 ({{ stats.hour_counts[stats.peak_hour] }} filas){% else %}—{% endif %}</td>
+                    <td>{{ stats.missing }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
     </section>
 
     {% if correlations %}
@@ -667,6 +688,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             {% endfor %}
         </div>
         {% endif %}
+
+        {% if plots.time_of_day %}
+        <h3>Distribución por Hora del Día ({{ plots.time_of_day | length }})</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+            {% for img in plots.time_of_day %}
+            <div class="plot-container">
+                <img src="data:image/png;base64,{{ img }}" alt="Time of day">
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
     </section>
 
     <footer>
@@ -696,6 +728,7 @@ def generate_html_report(
     column_types: Optional[dict] = None,
     column_dtypes: Optional[dict] = None,
     data_preview: Optional[pd.DataFrame] = None,
+    time_stats: Optional[dict] = None,
 ) -> str:
     """
     Generate HTML report with embedded base64 images.
@@ -706,6 +739,7 @@ def generate_html_report(
         column_types: Inferred semantic type per column, shown in the data quality table.
         column_dtypes: Storage dtype per column (int64, float64, str, ...), shown next to it.
         data_preview: The analysed DataFrame; its first rows open the report body.
+        time_stats: ``{column: TimeOfDayStats}`` for the time-of-day columns.
 
     Returns:
         Path to generated HTML file
@@ -735,6 +769,7 @@ def generate_html_report(
         "quasi_constant_columns": data_quality.get("quasi_constant_columns", {}),
         "numeric_stats": numeric_stats,
         "categorical_stats": categorical_stats,
+        "time_stats": time_stats or {},
         "correlations": correlations,
         "numeric_pairs": correlations.get("numeric_pairs", []),
         "categorical_pairs": correlations.get("categorical_pairs", []),
