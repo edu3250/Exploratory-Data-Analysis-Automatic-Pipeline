@@ -11,7 +11,7 @@ Un pipeline completo y automatizado para realizar análisis exploratorio de dato
 - **Detección de outliers**: IQR, MAD (z-score robusto), Isolation Forest multivariado
 - **Análisis de relaciones**: Correlación Pearson, Cramér's V (categóricas), correlation ratio (mixtas), detección de multicolinealidad (VIF)
 - **Análisis de target**: Auto-detección clasificación/regresión, balance de clases, relaciones feature-target, detección de fugas
-- **Visualizaciones**: Histogramas, boxplots, gráficos categóricos, matriz de correlaciones, mapa de nulos, scatter plots, series temporales — todos los gráficos generados se incluyen en el reporte
+- **Visualizaciones**: Histogramas, boxplots, gráficos categóricos, barras agrupadas del target frente a cada categórica, matriz de correlaciones, mapa de nulos, scatter plots, series temporales — todos los gráficos generados se incluyen en el reporte
 - **Reportes**: HTML auto-contenido (offline), JSON estructurado (`summary.json`), tablas CSV de resultados (`tables/`)
 - **Batch processing**: Procesa todos los archivos soportados de una carpeta, uno a la vez; un archivo que falla no aborta el resto
 - **Configuración flexible**: YAML + overrides de CLI, con validación y mensajes de error claros
@@ -388,6 +388,12 @@ Para columnas target:
 - **Columna inexistente**: en `analyze-file` el comando falla con un mensaje en español (columnas
   disponibles + sugerencia); en `analyze-batch` se registra una advertencia y el análisis de ese
   archivo continúa sin target
+
+Con un target de clasificación, el reporte agrega la sección «Target vs Variables Categóricas»
+debajo de «Distribuciones Categóricas»: un gráfico de barras agrupadas por cada variable
+categórica, con el porcentaje sobre el total encima de cada barra. Se omiten los targets de
+regresión y los de más de 12 clases, donde el gráfico deja de leerse; las categorías más allá de
+las 9 más frecuentes se agrupan en «Otros».
 
 ### Manejo de errores por paso
 

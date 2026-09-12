@@ -312,6 +312,95 @@ def plot_target_vs_feature(
     return True
 
 
+# Nine categories plus «Otros» is one bar per colour of the default cycle; a tenth would
+# repeat the first colour and make two different categories look like the same one.
+TARGET_BAR_MAX_CATEGORIES = 9
+TARGET_BAR_MAX_CLASSES = 12
+TARGET_BAR_MAX_LABELLED = 24
+_OTHERS_LABEL = "Otros"
+
+
+def target_vs_categorical_counts(
+    feature: pd.Series, target: pd.Series, max_categories: int = TARGET_BAR_MAX_CATEGORIES
+) -> pd.DataFrame:
+    """
+    Counts per target class (rows) and feature category (columns), ready to plot as grouped bars.
+
+    Rows missing either value are dropped, so the total equals what the chart shows and its
+    percentages add up to 100. Categories beyond ``max_categories`` are folded into «Otros»
+    instead of being dropped: a column such as `tipo_empleo` (21 values in the mortgage data)
+    would otherwise turn the legend into a wall of colours.
+    """
+    valid = pd.DataFrame({"feature": feature, "target": target}).dropna()
+    if valid.empty:
+        return pd.DataFrame()
+
+    valid["feature"] = valid["feature"].astype(str)
+    valid["target"] = valid["target"].astype(str)
+
+    ranking = valid["feature"].value_counts()
+    if len(ranking) > max_categories:
+        kept = list(ranking.index[:max_categories])
+        valid["feature"] = valid["feature"].where(valid["feature"].isin(kept), _OTHERS_LABEL)
+        order = kept + [_OTHERS_LABEL]
+    else:
+        order = list(ranking.index)
+
+    counts = pd.crosstab(valid["target"], valid["feature"])
+    return counts.reindex(index=_sorted_labels(counts.index), columns=order, fill_value=0)
+
+
+def _sorted_labels(labels) -> list[str]:
+    """Sort the target classes the way a reader expects: 2 before 10 when they are numbers."""
+    values = list(labels)
+    try:
+        return sorted(values, key=float)
+    except (TypeError, ValueError):
+        return sorted(values)
+
+
+@safe_plot
+def plot_target_vs_categorical(
+    feature: pd.Series, target: pd.Series, output_path: Path, max_categories: int = TARGET_BAR_MAX_CATEGORIES
+) -> bool:
+    """
+    Grouped bars of one categorical variable against the target, labelled with percentages.
+
+    The labels are shares of the plotted total, so the whole chart adds up to 100%: that is what
+    makes two classes of an imbalanced target comparable at a glance.
+    """
+    counts = target_vs_categorical_counts(feature, target, max_categories)
+    if counts.empty or counts.shape[0] < 2 or counts.shape[1] < 2:
+        # Nothing to compare: a single target class, or a feature with one value.
+        return False
+    if counts.shape[0] > TARGET_BAR_MAX_CLASSES:
+        logger.debug(f"Skipping grouped bars for {feature.name}: the target has {counts.shape[0]} classes")
+        return False
+
+    total = int(counts.to_numpy().sum())
+    n_bars = counts.shape[0] * counts.shape[1]
+    width = max(8, 1.1 * n_bars)
+    fig, ax = plt.subplots(figsize=(min(20, width), 6))
+    counts.plot(kind="bar", ax=ax, width=0.8)
+
+    # Past a certain number of bars the percentages overlap each other and hide the chart,
+    # the same reason the association heatmap only annotates while it stays readable.
+    if n_bars <= TARGET_BAR_MAX_LABELLED:
+        for container in ax.containers:
+            labels = [f"{bar.get_height() / total * 100:.2f} %" for bar in container]
+            ax.bar_label(container, labels=labels, fontsize=8, padding=2)
+
+    ax.set_title(f"{feature.name} vs {target.name}")
+    ax.set_xlabel(target.name)
+    ax.set_ylabel("Frecuencia")
+    ax.tick_params(axis="x", rotation=0)
+    ax.legend(title=feature.name)
+    ax.margins(y=0.12)  # room for the labels above the tallest bar
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
 def generate_all_visualizations(
     df: pd.DataFrame,
     column_types: dict[str, str],
@@ -323,6 +412,8 @@ def generate_all_visualizations(
     output_dir: Path,
     config_viz,
     assoc_matrix: pd.DataFrame | None = None,
+    target_column: str | None = None,
+    target_type: str | None = None,
 ) -> dict[str, list[str]]:
     """
     Generate all standard visualizations.
@@ -358,6 +449,17 @@ def generate_all_visualizations(
         if plot_categorical(df[col], output_file):
             cat_files.append(str(output_file))
     plot_files["categorical"] = cat_files
+
+    # Target against each categorical variable (only makes sense for a classification target)
+    target_bar_files = []
+    if target_column and target_type == "classification" and target_column in df.columns:
+        features = [col for col in categorical_cols if col != target_column]
+        logger.info(f"Generating {len(features)} grouped bar charts against '{target_column}'...")
+        for col in features[: config_viz.max_histograms]:
+            output_file = output_dir / f"target_bars_{col.replace('/', '_')}.png"
+            if plot_target_vs_categorical(df[col], df[target_column], output_file):
+                target_bar_files.append(str(output_file))
+    plot_files["target_categorical"] = target_bar_files
 
     # Correlation heatmap
     logger.info("Generating correlation heatmap...")

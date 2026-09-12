@@ -630,6 +630,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
         {% endif %}
 
+        {% if plots.target_categorical %}
+        <h3>Target vs Variables Categóricas ({{ plots.target_categorical | length }})</h3>
+        <p style="color: #555; margin-top: -8px;">
+            Barras agrupadas de cada variable categórica frente al target
+            {% if target_analysis %}<strong>{{ target_analysis.target_column }}</strong>{% endif %}.
+            Cada etiqueta es el porcentaje sobre el total de filas del gráfico, así que las barras suman 100%.
+        </p>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+            {% for img in plots.target_categorical %}
+            <div class="plot-container">
+                <img src="data:image/png;base64,{{ img }}" alt="Target vs categorical">
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
         {% if plots.scatter %}
         <h3>Scatter Plots (Pares con Mayor Correlación)</h3>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">

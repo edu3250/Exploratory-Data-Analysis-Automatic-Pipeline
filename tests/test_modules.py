@@ -38,6 +38,11 @@ from eda_pipeline.type_inference import (
     infer_semantic_type,
 )
 from eda_pipeline.univariate_analysis import analyze_categorical, analyze_numeric
+from eda_pipeline.visualizations import (
+    TARGET_BAR_MAX_CLASSES,
+    plot_target_vs_categorical,
+    target_vs_categorical_counts,
+)
 
 
 class TestConfig:
@@ -841,6 +846,109 @@ class TestAssociationMatrix:
         matrix = association_matrix(df, ["a", "b"], ["g"])
         assert matrix.loc["a", "b"] == pytest.approx(-1.0)
         assert matrix.loc["a", "g"] >= 0.0
+
+
+class TestTargetCategoricalBars:
+    """Grouped bars comparing the target against each categorical variable."""
+
+    @staticmethod
+    def _frame(n: int = 120) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "grupo": [["a", "a", "b", "c"][i % 4] for i in range(n)],
+                "target": [["si", "no"][i % 2] for i in range(n)],
+            }
+        )
+
+    def test_counts_cross_the_target_classes_with_the_feature_categories(self):
+        df = self._frame()
+        counts = target_vs_categorical_counts(df["grupo"], df["target"])
+        assert list(counts.index) == ["no", "si"]  # target classes, in a stable order
+        assert set(counts.columns) == {"a", "b", "c"}
+        assert counts.to_numpy().sum() == len(df)
+
+    def test_categories_are_ordered_by_frequency(self):
+        df = self._frame()
+        counts = target_vs_categorical_counts(df["grupo"], df["target"])
+        assert list(counts.columns) == ["a", "b", "c"]  # "a" appears twice per cycle
+
+    def test_rows_without_feature_or_target_are_dropped(self):
+        # The labels are percentages of the total plotted, so incomplete rows must not count.
+        df = pd.DataFrame(
+            {
+                "grupo": ["a", "b", None, "a"],
+                "target": ["si", "no", "si", None],
+            }
+        )
+        counts = target_vs_categorical_counts(df["grupo"], df["target"])
+        assert counts.to_numpy().sum() == 2
+
+    def test_rare_categories_are_grouped_into_otros(self):
+        df = pd.DataFrame(
+            {
+                "grupo": [f"c{i % 12}" for i in range(240)],
+                "target": [["si", "no"][i % 2] for i in range(240)],
+            }
+        )
+        counts = target_vs_categorical_counts(df["grupo"], df["target"], max_categories=3)
+        assert len(counts.columns) == 4
+        assert counts.columns[-1] == "Otros"
+        assert counts.to_numpy().sum() == 240  # grouping never loses rows
+
+    def test_numeric_target_classes_are_ordered_as_numbers(self):
+        """Read as text, class 10 would sit between 1 and 2."""
+        n = 132
+        df = pd.DataFrame(
+            {
+                "grupo": [["a", "b"][i % 2] for i in range(n)],
+                "meses_mora": [i % 11 for i in range(n)],
+            }
+        )
+        counts = target_vs_categorical_counts(df["grupo"], df["meses_mora"])
+        assert list(counts.index) == [str(i) for i in range(11)]
+
+    def test_never_shows_more_categories_than_the_palette_has_colours(self):
+        """Two categories drawn in the same colour read as one; the default cycle sets the limit."""
+        import matplotlib.pyplot as plt
+
+        df = pd.DataFrame(
+            {
+                "grupo": [f"c{i % 30}" for i in range(600)],
+                "target": [["si", "no"][i % 2] for i in range(600)],
+            }
+        )
+        counts = target_vs_categorical_counts(df["grupo"], df["target"])
+        assert len(counts.columns) <= len(plt.rcParams["axes.prop_cycle"])
+
+    def test_writes_the_plot(self, tmp_output_dir):
+        df = self._frame()
+        output = tmp_output_dir / "target_bars_grupo.png"
+        assert plot_target_vs_categorical(df["grupo"], df["target"], output) is True
+        assert output.exists()
+
+    def test_single_class_target_has_nothing_to_compare(self, tmp_output_dir):
+        df = self._frame()
+        df["target"] = "si"
+        output = tmp_output_dir / "target_bars_grupo.png"
+        assert plot_target_vs_categorical(df["grupo"], df["target"], output) is False
+        assert not output.exists()
+
+    def test_target_with_too_many_classes_is_skipped(self, tmp_output_dir):
+        n = (TARGET_BAR_MAX_CLASSES + 1) * 10
+        df = pd.DataFrame(
+            {
+                "grupo": [["a", "b"][i % 2] for i in range(n)],
+                "target": [f"clase{i % (TARGET_BAR_MAX_CLASSES + 1)}" for i in range(n)],
+            }
+        )
+        output = tmp_output_dir / "target_bars_grupo.png"
+        assert plot_target_vs_categorical(df["grupo"], df["target"], output) is False
+
+    def test_constant_feature_is_skipped(self, tmp_output_dir):
+        df = self._frame()
+        df["grupo"] = "a"
+        output = tmp_output_dir / "target_bars_grupo.png"
+        assert plot_target_vs_categorical(df["grupo"], df["target"], output) is False
 
 
 if __name__ == "__main__":
