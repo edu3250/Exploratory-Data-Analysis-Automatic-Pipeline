@@ -412,6 +412,8 @@ class EDAPipeline:
                 plots_dir,
                 self.config.visualizations,
                 assoc_matrix=relationships_report.association_matrix,
+                target_column=target_column,
+                target_type=target_report.target_type if target_report else None,
                 default={},
             )
             or {}

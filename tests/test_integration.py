@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from eda_pipeline.config import Config
+from eda_pipeline.config import Config, TargetConfig
 from eda_pipeline.pipeline import EDAPipeline
 
 
@@ -462,6 +462,73 @@ class TestOutputCompleteness:
         assert "<th>ciudad</th>" in section
         assert "<th>monto</th>" in section
         assert "Ciudad 0" in section
+
+    @staticmethod
+    def _target_dataset(n: int = 200) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "edad": [20 + i % 40 for i in range(n)],
+                "genero": [["M", "F"][i % 2] for i in range(n)],
+                "fumador": [["si", "no", "no"][i % 3] for i in range(n)],
+                "enfermo": [["0", "1"][i % 2] for i in range(n)],
+            }
+        )
+
+    def test_target_analysis_adds_grouped_bars_per_categorical(self, tmp_output_dir):
+        """With a target, the report compares it against every categorical variable."""
+        csv_file = tmp_output_dir / "pacientes.csv"
+        self._target_dataset().to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(
+            input_file=str(csv_file),
+            output_dir=str(tmp_output_dir),
+            target=TargetConfig(target_column="enfermo"),
+        )
+        results = pipeline.run()
+
+        result = results["pacientes"]
+        plots = {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
+        assert "target_bars_genero.png" in plots
+        assert "target_bars_fumador.png" in plots
+        assert "target_bars_enfermo.png" not in plots  # the target against itself says nothing
+
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        assert "Target vs Variables Categóricas" in html
+        categorical_at = html.index("Distribuciones Categóricas")
+        target_bars_at = html.index("Target vs Variables Categóricas")
+        assert categorical_at < target_bars_at
+
+    def test_a_regression_target_gets_no_grouped_bars(self, tmp_output_dir):
+        """Bars per class need classes: a continuous target would draw one group per value."""
+        n = 200
+        df = self._target_dataset(n)
+        df["monto"] = [1000.0 + i * 3.7 for i in range(n)]
+        csv_file = tmp_output_dir / "pacientes.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(
+            input_file=str(csv_file),
+            output_dir=str(tmp_output_dir),
+            target=TargetConfig(target_column="monto"),
+        )
+        results = pipeline.run()
+
+        result = results["pacientes"]
+        assert json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))["target"]["target_type"] == (
+            "regression"
+        )
+        plots = {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
+        assert not any(name.startswith("target_bars_") for name in plots)
+
+    def test_without_a_target_there_are_no_grouped_bars(self, tmp_output_dir):
+        csv_file = tmp_output_dir / "pacientes.csv"
+        self._target_dataset().to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["pacientes"]
+        plots = {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
+        assert not any(name.startswith("target_bars_") for name in plots)
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        assert "Target vs Variables Categóricas" not in html
 
     def test_numeric_id_columns_are_not_analysed_as_variables(self, tmp_output_dir):
         """A key stored as a number used to get a histogram, a boxplot, VIF and scatter plots."""
