@@ -17,7 +17,7 @@ excel_sheet: null
 file_format: null
 outliers:
   iqr_multiplier: 1.5
-  isolation_forest_contamination: 0.1
+  isolation_forest_contamination: null
   isolation_forest_enabled: true
   z_score_threshold: 3.0
 output_dir: reports

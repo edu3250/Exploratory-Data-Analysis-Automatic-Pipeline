@@ -455,7 +455,7 @@ class TestOutputCompleteness:
         pipeline = _make_pipeline(
             input_file=str(csv_file),
             output_dir=str(tmp_output_dir),
-            outliers=OutlierConfig(isolation_forest_enabled=False),  # it flags 10% by construction
+            outliers=OutlierConfig(isolation_forest_enabled=False),  # IQR and MAD on their own
         )
         results = pipeline.run()
 
@@ -471,6 +471,36 @@ class TestOutputCompleteness:
         html = Path(result["html_report"]).read_text(encoding="utf-8")
         outliers_section = html[html.index('<section id="outliers">') :]
         assert "discount_pct" in outliers_section[: outliers_section.index("</section>")]
+
+    def test_isolation_forest_cut_is_explained_in_every_output(self, tmp_output_dir):
+        """The cut used to be a hidden 10%; the summary, the CSV table and the report now say how it was drawn."""
+        n = 600
+        df = pd.DataFrame(
+            {
+                "monto": [100.0 + (i * 37) % 200 for i in range(n)],
+                "plazo": [12.0 + (i * 11) % 48 for i in range(n)],
+            }
+        )
+        df.loc[[5, 250, 480], ["monto", "plazo"]] = [5000.0, 900.0]
+        csv_file = tmp_output_dir / "creditos.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["creditos"]
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        forest = summary["outliers"]["isolation_forest"]
+        assert 3 <= forest["outlier_rows"] < 0.1 * n
+        assert "Q3" in forest["note"]
+
+        table = pd.read_csv(Path(result["output_dir"]) / "tables" / "outlier_summary.csv")
+        row = table[table["metodo"] == "isolation_forest"].iloc[0]
+        assert row["n_outliers"] == forest["outlier_rows"]
+        assert "Q3" in row["nota"]
+
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        section = html[html.index('<section id="outliers">') :]
+        assert "Q3" in section[: section.index("</section>")]
 
     def test_report_shows_the_first_rows_before_the_univariate_section(self, tmp_output_dir):
         """A preview of the data must sit ahead of «Análisis Univariado» in the report."""

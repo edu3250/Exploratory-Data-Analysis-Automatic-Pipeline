@@ -29,7 +29,13 @@ from eda_pipeline.data_loader import (
 )
 from eda_pipeline.data_quality import analyze_data_quality, analyze_duplicates
 from eda_pipeline.html_report import column_quality_rows, overall_missing_pct, preview_rows
-from eda_pipeline.outlier_detection import detect_outliers_iqr, detect_outliers_mad
+from eda_pipeline.outlier_detection import (
+    ISOLATION_FOREST_MIN_ROWS,
+    detect_outliers_iqr,
+    detect_outliers_isolation_forest,
+    detect_outliers_mad,
+    isolation_forest_cutoff,
+)
 from eda_pipeline.relationships import association_matrix, correlation_ratio, cramers_v, pearson_correlation
 from eda_pipeline.target_analysis import analyze_class_balance
 from eda_pipeline.type_inference import (
@@ -106,6 +112,7 @@ class TestConfig:
             {"data_quality": {"missing_threshold": 1.5}},
             {"data_quality": {"missing_threshold": 0}},
             {"outliers": {"iqr_multiplier": -1}},
+            {"outliers": {"isolation_forest_contamination": 1.5}},
             {"visualizations": {"max_histograms": 0}},
             {"target": {"class_imbalance_threshold": 1.5}},
             {"target": {"target_type": "bogus"}},
@@ -134,6 +141,12 @@ class TestConfig:
         merged = merge_configs(base, file_config, cli_overrides)
         assert merged.target.target_column == "y"
         assert merged.target.class_imbalance_threshold == 0.65
+
+    def test_isolation_forest_contamination_is_optional(self):
+        # No fixed share by default: the cut comes from each dataset's own anomaly scores.
+        assert Config().outliers.isolation_forest_contamination is None
+        config = Config.from_dict({"outliers": {"isolation_forest_contamination": 0.05}})
+        assert config.outliers.isolation_forest_contamination == 0.05
 
     def test_duplicate_threshold_and_batch_pattern_are_configurable(self):
         config = Config.from_dict({"data_quality": {"duplicate_threshold": 0.2}, "batch_pattern": "*.csv"})
@@ -785,6 +798,47 @@ class TestOutlierDetection:
         info = detect_outliers_mad(self._discounts())
         assert info.n_outliers == 0
         assert "MAD = 0" in info.note
+
+
+class TestIsolationForest:
+    """Isolation Forest flagged a fixed 10% of every dataset, whatever its data looked like."""
+
+    @staticmethod
+    def _with_planted_anomalies(n: int = 1000, n_anomalies: int = 10) -> tuple[pd.DataFrame, list[int]]:
+        rng = np.random.default_rng(0)
+        df = pd.DataFrame(rng.normal(size=(n, 3)), columns=["a", "b", "c"])
+        planted = list(range(0, n, n // n_anomalies))[:n_anomalies]
+        df.loc[planted, ["a", "b", "c"]] = 8.0  # far from everything else
+        return df, planted
+
+    def test_cutoff_is_tukeys_upper_fence_over_the_scores(self):
+        scores = np.array([0.40, 0.42, 0.44, 0.46, 0.48, 0.50, 0.52, 0.54, 0.80])
+        q1, q3 = np.percentile(scores, [25, 75])
+        assert isolation_forest_cutoff(scores) == pytest.approx(q3 + 1.5 * (q3 - q1))
+        assert isolation_forest_cutoff(scores, multiplier=3.0) == pytest.approx(q3 + 3.0 * (q3 - q1))
+
+    def test_cutoff_without_spread_is_none(self):
+        assert isolation_forest_cutoff(np.full(50, 0.5)) is None
+
+    def test_flags_the_isolated_rows_and_not_a_fixed_share(self):
+        df, planted = self._with_planted_anomalies()
+        results, note = detect_outliers_isolation_forest(df, ["a", "b", "c"])
+        flagged = set(results[0].outlier_indices)
+        assert set(planted) <= flagged
+        assert len(flagged) < 0.05 * len(df)  # the fixed rule flagged exactly 10%
+        assert "Q3" in note
+
+    def test_explicit_contamination_keeps_the_fixed_share(self):
+        df, _ = self._with_planted_anomalies()
+        results, note = detect_outliers_isolation_forest(df, ["a", "b", "c"], contamination=0.1)
+        assert results[0].n_outliers == 100
+        assert "10%" in note
+
+    def test_too_few_rows_are_not_scored(self):
+        df, _ = self._with_planted_anomalies(n=ISOLATION_FOREST_MIN_ROWS - 1, n_anomalies=1)
+        results, note = detect_outliers_isolation_forest(df, ["a", "b", "c"])
+        assert results == []
+        assert "No aplicado" in note
 
 
 class TestRelationships:

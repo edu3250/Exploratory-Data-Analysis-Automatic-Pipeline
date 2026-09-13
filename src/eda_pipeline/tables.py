@@ -108,14 +108,15 @@ def _outlier_summary_table(outliers_report) -> pd.DataFrame:
         for col, info in info_map.items():
             rows.append({"columna": col, "metodo": method_name, "n_outliers": info.n_outliers, "nota": info.note})
 
-    if outliers_report.multivariate_outliers:
+    if outliers_report.multivariate_outliers or outliers_report.multivariate_note:
         # All entries share the same multivariate outlier set; one summary row is enough.
+        flagged = outliers_report.multivariate_outliers
         rows.append(
             {
                 "columna": "(multivariado)",
                 "metodo": "isolation_forest",
-                "n_outliers": outliers_report.multivariate_outliers[0].n_outliers,
-                "nota": "",
+                "n_outliers": flagged[0].n_outliers if flagged else 0,
+                "nota": outliers_report.multivariate_note,
             }
         )
 
