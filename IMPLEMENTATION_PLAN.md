@@ -349,3 +349,28 @@ Verified with real output:
 - Share of rows with at least one outlier, before → after; only the datasets holding such a column change: `Order_Details` 34.2% → 18.3%, `credito_asegurado` 37.7% → 30.7%, `Inventory` 14.5% → 12.9%.
 - The same regenerated batch gives `Order_Details` 40 184 rows with an outlier (18.3%) and `Inventory` 7 570 (12.9%), with the `nota` in `outlier_summary.csv` and «IQR no aplicado» in the report. All 8 files match their CSV row counts and none has a failed step.
 - Still open, not changed here: Isolation Forest flags `isolation_forest_contamination` (0.1) of the rows by construction, about 10 points of what remains on every dataset.
+
+## Stage 17: The Isolation Forest cut drawn from each dataset's scores
+**Goal**: Isolation Forest flagged a fixed 10% of every dataset (`contamination=0.1`), whatever its data looked like: 21 932 rows of `Order_Details`, 31 of the 366 rows of a calendar table. The user asked whether the cut could come from the anomaly scores the algorithm already computes for every row.
+
+**Success Criteria**:
+- By default, a row is flagged when its anomaly score exceeds `Q3 + iqr_multiplier·IQR` of that dataset's scores, the Tukey fence the report already applies to single columns.
+- A number in `isolation_forest_contamination` still flags that fixed share; the setting now defaults to `null`.
+- Scores with no spread flag nothing, and fewer than 30 complete rows are not scored.
+- The cut used, or why the method did not run, reaches `summary.json` (`outliers.isolation_forest`), `tables/outlier_summary.csv` and the report.
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (the `1.5` case of `test_invalid_values_raise_config_error` is a guard that passed before too; the rest failed before the code existed):
+- `tests/test_modules.py::TestIsolationForest::test_cutoff_is_tukeys_upper_fence_over_the_scores`, `test_cutoff_without_spread_is_none`, `test_flags_the_isolated_rows_and_not_a_fixed_share`, `test_explicit_contamination_keeps_the_fixed_share` and `test_too_few_rows_are_not_scored`.
+- `tests/test_modules.py::TestConfig::test_isolation_forest_contamination_is_optional`, plus the `1.5` guard.
+- `tests/test_integration.py::TestOutputCompleteness::test_isolation_forest_cut_is_explained_in_every_output` (failed on the old code with `KeyError: 'isolation_forest'`).
+
+**Status**: COMPLETE. PR #20 was merged on 2026-09-13 as `e18ee73`, and its branch was deleted.
+
+Verified with real output:
+- **200 tests passed** on the branch, 0 failed, 0 warnings (192 + 8 new). Ruff clean. `main` after the merge: **200 passed**, ruff clean.
+- Three cuts were compared before the code was written. scikit-learn's own `"auto"` cut (score > 0.5) flagged 17.2% of clean normal data and 33.8% of `Order_Details`, worse than the fixed share, and was dropped. The Tukey fence flagged 1.6% of clean data, and all 100 anomalies planted in a synthetic set plus 58 normal rows.
+- 300 trees, from timing and 5-seed stability runs on every dataset: with 100 trees the seed alone moved `Dates` between 0 and 31 flagged rows and `siniestros` between 37 and 63; with 300 they held at 0 and at 50–59; 500 steadied nothing further and took 9.5–11.5 s against 4.6 s on the 219 432 rows of `Order_Details`. Parallel scoring did not help at 300 trees.
+- Differential run over the 17 datasets, `main` against the branch, Isolation Forest share (and rows with any outlier): `Order_Details` 10.0% → 0.6% (18.3% → 14.2%), `stroke` 9.6% → 1.5% (15.5% → 14.0%), `ecommerce` 9.0% → 1.5% (12.7% → 6.7%), `Dates` 8.5% → 0% (8.5% → 0%), but `Inventory` 10.0% → 12.1% (12.9% → 14.4%) and `siniestros` 10.2% → 12.8%. `Sales_Outlet` (5 rows) is no longer scored. The outlier step takes about twice as long (`Order_Details` 3.9 s → 6.0 s).
+- The Vistara batch regenerated on `main` (`reports/Vistara_batch_20260913_121354`) matches the differential run: `Order_Details` 40 184 → 31 122 rows with an outlier (14.2%), of which Isolation Forest flags 1 272 above a score of 0.707; `Dates` 31 → 0; `Inventory` 7 570 → 8 461; `Sales_Outlet` reads «No aplicado: 5 filas completas». All 8 files match their CSV row counts, none has a failed step, and the alerts are unchanged.
+- Known limit: the fence is relative. On a dataset with no anomaly it still flags the most isolated 1–2% of rows, so the report reads as "most isolated rows", not as errors.
