@@ -521,7 +521,15 @@ class EDAPipeline:
                 "mixed_pairs_count": len(relationships_report.mixed_pairs),
                 "multicollinearity_vif": relationships_report.vif,
             },
-            "outliers": {"total_outlier_rows": len(outliers_report.outlier_indices_union)},
+            "outliers": {
+                "total_outlier_rows": len(outliers_report.outlier_indices_union),
+                "isolation_forest": {
+                    "outlier_rows": outliers_report.multivariate_outliers[0].n_outliers
+                    if outliers_report.multivariate_outliers
+                    else 0,
+                    "note": outliers_report.multivariate_note,
+                },
+            },
             "failed_steps": failed_steps,
         }
 

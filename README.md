@@ -145,7 +145,7 @@ outliers:
   iqr_multiplier: 1.5
   z_score_threshold: 3.0
   isolation_forest_enabled: true
-  isolation_forest_contamination: 0.1
+  isolation_forest_contamination: null  # null = corte según las puntuaciones; un número = % fijo
 
 visualizations:
   max_histograms: 20
@@ -363,7 +363,12 @@ Detectados por:
 
 - **IQR**: límites `[Q1 - 1.5×IQR, Q3 + 1.5×IQR]`
 - **MAD**: z-score robusto `|x - mediana| / MAD > 3.0`
-- **Isolation Forest**: Anomalías multivariadas
+- **Isolation Forest**: Anomalías multivariadas. Cada fila recibe una puntuación de anomalía, y se
+  marcan las que superan `Q3 + 1.5×IQR` de las puntuaciones de ese mismo dataset (el mismo
+  `iqr_multiplier` que usa el IQR). El porcentaje marcado cambia con los datos: en los datasets de
+  ejemplo va del 0.3 % al 12 %. Antes se marcaba siempre el 10 % de las filas. Con
+  `isolation_forest_contamination` se puede volver a fijar un porcentaje. No se aplica con menos de
+  30 filas completas, y el reporte y `outlier_summary.csv` indican el corte usado.
 
 Cuando al menos la mitad de una columna tiene el mismo valor (por ejemplo, un descuento que es 0 en el 77 %
 de las ventas), el IQR y el MAD valen 0: el rango "normal" se reduce a ese único valor y cualquier otro

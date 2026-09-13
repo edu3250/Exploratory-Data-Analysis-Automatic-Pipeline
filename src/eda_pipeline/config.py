@@ -42,7 +42,8 @@ class OutlierConfig:
     iqr_multiplier: float = 1.5
     z_score_threshold: float = 3.0
     isolation_forest_enabled: bool = True
-    isolation_forest_contamination: float = 0.1
+    # None: the cut comes from each dataset's anomaly scores. A number flags that fixed share of rows.
+    isolation_forest_contamination: Optional[float] = None
 
 
 @dataclass
@@ -141,7 +142,8 @@ class Config:
 
         _require_positive("outliers.iqr_multiplier", self.outliers.iqr_multiplier)
         _require_positive("outliers.z_score_threshold", self.outliers.z_score_threshold)
-        _require_ratio("outliers.isolation_forest_contamination", self.outliers.isolation_forest_contamination)
+        if self.outliers.isolation_forest_contamination is not None:
+            _require_ratio("outliers.isolation_forest_contamination", self.outliers.isolation_forest_contamination)
 
         _require_positive_int("visualizations.max_histograms", self.visualizations.max_histograms)
         _require_positive_int("visualizations.max_boxplots", self.visualizations.max_boxplots)
@@ -273,7 +275,7 @@ def create_default_config_file(output_path: Path) -> None:
             "iqr_multiplier": 1.5,
             "z_score_threshold": 3.0,
             "isolation_forest_enabled": True,
-            "isolation_forest_contamination": 0.1,
+            "isolation_forest_contamination": None,
         },
         "visualizations": {
             "max_histograms": 20,

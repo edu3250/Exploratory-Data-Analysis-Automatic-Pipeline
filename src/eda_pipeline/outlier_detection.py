@@ -123,60 +123,107 @@ def detect_outliers_mad(series: pd.Series, z_threshold: float = 3.0) -> OutlierI
     )
 
 
-def detect_outliers_isolation_forest(
-    df: pd.DataFrame, numeric_cols: list[str], contamination: float = 0.1, random_state: int = 42
-) -> list[OutlierInfo]:
+# Isolation Forest used to flag a fixed share of every dataset (contamination=0.1): 10% of the rows
+# whatever the data looked like. The cut now comes from each dataset's own anomaly scores, with the
+# same Tukey fence the report applies to single columns. Measured across the 17 datasets in data/raw,
+# the flagged share then ranges from 0.3% (Order_Details) to about 12% (siniestros), and on clean
+# synthetic data it drops under 2%.
+#
+# 300 trees: with 100, the random seed alone moved Dates between 0 and 31 flagged rows and siniestros
+# between 37 and 63; with 300 they hold at 0 and at 50-59. 500 trees steadied nothing further and
+# doubled the time on Order_Details (219432 rows: 4.6 s against 9.5 s).
+ISOLATION_FOREST_TREES = 300
+
+# Below a few dozen rows a share of flagged rows says nothing: one row of Sales_Outlet is 20%, and the
+# quartiles of five scores are not a distribution. Products (40 rows) already behaves, moving by a
+# single row across seeds.
+ISOLATION_FOREST_MIN_ROWS = 30
+
+
+def isolation_forest_cutoff(scores: np.ndarray, multiplier: float = 1.5) -> float | None:
     """
-    Detect multivariate outliers using Isolation Forest.
+    Tukey's upper fence over the anomaly scores (higher = more isolated): Q3 + multiplier * IQR.
+
+    None when the scores have no spread, for the same reason IQR itself is not applied then: the fence
+    would collapse onto the common value and flag whatever sits above it.
+    """
+    q1, q3 = np.percentile(scores, [25, 75])
+    iqr = q3 - q1
+    if iqr == 0:
+        return None
+    return float(q3 + multiplier * iqr)
+
+
+def detect_outliers_isolation_forest(
+    df: pd.DataFrame,
+    numeric_cols: list[str],
+    contamination: float | None = None,
+    random_state: int = 42,
+    iqr_multiplier: float = 1.5,
+) -> tuple[list[OutlierInfo], str]:
+    """
+    Detect multivariate outliers with Isolation Forest.
 
     Args:
         df: DataFrame
-        numeric_cols: Numeric columns to use
-        contamination: Fraction of outliers to expect (0.0-0.5)
+        numeric_cols: Numeric columns to use (rows missing any of them are left out)
+        contamination: A fixed share of rows to flag, when set explicitly. None (the default) draws
+            the cut from the anomaly scores instead (see isolation_forest_cutoff).
         random_state: Random seed
+        iqr_multiplier: The fence multiplier applied to the scores
 
     Returns:
-        List of OutlierInfo objects (one per numeric column with outliers found)
+        (one OutlierInfo per numeric column, all sharing the same flagged rows; a Spanish note saying
+        how the cut was drawn, or why the method was not applied)
     """
-    if not numeric_cols or len(df) < 2:
-        return []
+    if not numeric_cols:
+        return [], ""
 
-    # Prepare data
     df_numeric = df[numeric_cols].dropna()
-    if len(df_numeric) < 2:
-        return []
+    if len(df_numeric) < ISOLATION_FOREST_MIN_ROWS:
+        return [], (
+            f"No aplicado: {len(df_numeric)} filas completas; se necesitan al menos {ISOLATION_FOREST_MIN_ROWS}."
+        )
 
     try:
-        # Train Isolation Forest
-        iso_forest = IsolationForest(contamination=min(contamination, 0.5), random_state=random_state, n_estimators=100)
-        predictions = iso_forest.fit_predict(df_numeric)
-
-        # Get outlier indices (-1 indicates outlier)
-        outlier_mask = predictions == -1
-        if not outlier_mask.any():
-            return []
-
-        # Create result per column (mark overall multivariate outliers)
-        results = []
-        outlier_indices = df_numeric[outlier_mask].index.tolist()
-
-        # Return as a single entry for all numeric columns
-        if outlier_indices:
-            for col in numeric_cols:
-                results.append(
-                    OutlierInfo(
-                        method="isolation_forest",
-                        column=col,
-                        n_outliers=len(outlier_indices),
-                        outlier_indices=outlier_indices,
-                        values=df.loc[outlier_indices, col].dropna().tolist(),
-                    )
-                )
-
-        return results
+        if contamination is not None:
+            share = min(contamination, 0.5)
+            forest = IsolationForest(
+                contamination=share, random_state=random_state, n_estimators=ISOLATION_FOREST_TREES
+            )
+            outlier_mask = forest.fit_predict(df_numeric) == -1
+            note = f"Porcentaje fijo: el {share:.0%} de las filas (isolation_forest_contamination)."
+        else:
+            forest = IsolationForest(random_state=random_state, n_estimators=ISOLATION_FOREST_TREES)
+            scores = -forest.fit(df_numeric).score_samples(df_numeric)  # in (0, 1]; higher = more isolated
+            cutoff = isolation_forest_cutoff(scores, iqr_multiplier)
+            if cutoff is None:
+                return [], "Sin dispersión en las puntuaciones de anomalía: no se marca ninguna fila."
+            outlier_mask = scores > cutoff
+            note = (
+                f"Puntuación de anomalía mayor que {cutoff:.3f} "
+                f"(Q3 + {iqr_multiplier:g}·IQR de las puntuaciones de este dataset)."
+            )
     except Exception as e:
         logger.warning(f"Isolation Forest failed: {e}")
-        return []
+        return [], ""
+
+    outlier_indices = df_numeric[outlier_mask].index.tolist()
+    if not outlier_indices:
+        return [], note
+
+    results = [
+        OutlierInfo(
+            method="isolation_forest",
+            column=col,
+            n_outliers=len(outlier_indices),
+            outlier_indices=outlier_indices,
+            values=df.loc[outlier_indices, col].dropna().tolist(),
+            note=note,
+        )
+        for col in numeric_cols
+    ]
+    return results, note
 
 
 @dataclass
@@ -187,6 +234,7 @@ class OutlierReport:
     mad_outliers: dict[str, OutlierInfo]
     multivariate_outliers: list[OutlierInfo]
     outlier_indices_union: set[int]  # All unique indices flagged as outliers
+    multivariate_note: str = ""  # how the Isolation Forest cut was drawn, or why it was not applied
 
 
 def analyze_outliers(
@@ -195,7 +243,7 @@ def analyze_outliers(
     iqr_multiplier: float = 1.5,
     z_score_threshold: float = 3.0,
     isolation_forest_enabled: bool = True,
-    isolation_forest_contamination: float = 0.1,
+    isolation_forest_contamination: float | None = None,
 ) -> OutlierReport:
     """
     Perform comprehensive outlier analysis.
@@ -215,9 +263,11 @@ def analyze_outliers(
         mad_results[col] = mad_info
 
     # Multivariate outlier detection
-    multivariate_results = []
+    multivariate_results, multivariate_note = [], ""
     if isolation_forest_enabled:
-        multivariate_results = detect_outliers_isolation_forest(df, numeric_cols, isolation_forest_contamination)
+        multivariate_results, multivariate_note = detect_outliers_isolation_forest(
+            df, numeric_cols, isolation_forest_contamination, iqr_multiplier=iqr_multiplier
+        )
 
     # Collect all unique outlier indices
     all_indices = set()
@@ -233,4 +283,5 @@ def analyze_outliers(
         mad_outliers=mad_results,
         multivariate_outliers=multivariate_results,
         outlier_indices_union=all_indices,
+        multivariate_note=multivariate_note,
     )
