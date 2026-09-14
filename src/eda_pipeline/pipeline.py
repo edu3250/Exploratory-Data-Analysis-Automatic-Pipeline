@@ -12,7 +12,7 @@ from pathlib import Path
 import pandas as pd
 
 from .config import Config
-from .data_loader import discover_batch_files, load_data
+from .data_loader import discover_batch_files, load_data, replace_missing_placeholders
 from .data_quality import SEVERITY_ORDER, Alert, DataQualityReport, analyze_data_quality
 from .html_report import generate_html_report
 from .logging_util import generate_correlation_id, setup_logging
@@ -73,6 +73,23 @@ def _build_target_alerts(target_report) -> list[Alert]:
                 column=target_report.target_column,
                 message=leak_message,
                 recommendation="Revise si esta variable debería excluirse del modelo por fuga de información.",
+            )
+        )
+    return alerts
+
+
+def _placeholder_alerts(missing_placeholders: dict[str, dict[str, int]]) -> list[Alert]:
+    """One alert per column where punctuation-only cells were read as missing values."""
+    alerts = []
+    for column, counts in missing_placeholders.items():
+        total = sum(counts.values())
+        values = ", ".join(f"'{value}' ({count})" for value, count in counts.items())
+        alerts.append(
+            Alert(
+                severity="low",
+                column=column,
+                message=f"Columna '{column}': {total} valor(es) que solo son signos se tomaron como faltantes: {values}",
+                recommendation="Revise el origen de los datos: esos marcadores suelen indicar un valor no registrado.",
             )
         )
     return alerts
@@ -296,6 +313,10 @@ class EDAPipeline:
 
         # Type inference + user overrides. Not step-isolated: every later step depends on it,
         # so a failure here should surface as a dataset-level error (via _load_and_analyze).
+        # Cells that only hold punctuation (".", "?", "-") are missing values, not categories. They
+        # are replaced before anything reads the data, and reported below as alerts.
+        df, missing_placeholders = replace_missing_placeholders(df)
+
         self.logger.info("Inferring column types...")
         column_types = infer_all_types(df, identifier_min_unique=self.config.data_quality.cardinality_threshold)
         df, override_result = apply_column_type_overrides(df, column_types, self.config.column_types)
@@ -389,6 +410,7 @@ class EDAPipeline:
 
         # Merge data-quality alerts with target-derived alerts (imbalance, leakage, missing target).
         combined_alerts = list(dq_report.alerts)
+        combined_alerts.extend(_placeholder_alerts(missing_placeholders))
         if target_report:
             combined_alerts.extend(_build_target_alerts(target_report))
         if target_missing_alert:
@@ -503,6 +525,7 @@ class EDAPipeline:
                 "quasi_constant_columns": dq_report.quasi_constant_columns,
                 "high_cardinality_columns": dq_report.high_cardinality_columns,
                 "mixed_type_columns": dq_report.mixed_type_columns,
+                "missing_placeholders": missing_placeholders,
             },
             "alerts": [
                 {"severity": a.severity, "column": a.column, "message": a.message, "recommendation": a.recommendation}

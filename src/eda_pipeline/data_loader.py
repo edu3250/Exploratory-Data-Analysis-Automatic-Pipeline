@@ -19,6 +19,45 @@ SUPPORTED_EXTENSIONS = (".csv", ".tsv", ".txt", ".xlsx", ".xls", ".parquet", ".j
 
 _DELIMITER_CANDIDATES = ",;\t|"
 
+# A cell holding nothing but punctuation marks a missing value, not a category: penguins sex has one
+# "." among MALE and FEMALE, which the report counted as a third sex. pandas already reads "", "NA",
+# "N/A", "null" and similar as missing; these are the ones it leaves as text. Across the 19 datasets
+# in data/raw they occur only in the two penguin sex columns.
+_MISSING_PLACEHOLDER_PATTERN = re.compile(r"^\s*[.\-?_*/]+\s*$")
+
+
+def replace_missing_placeholders(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, dict[str, int]]]:
+    """
+    Turn cells that hold only punctuation (".", "-", "?", "--") into missing values.
+
+    A text column whose remaining values are all numbers becomes numeric: a "?" in a column of
+    weights is what made pandas read every weight as text in the first place.
+
+    Returns:
+        (the frame, changed only in the affected columns; {column: {placeholder: count}} of what
+        was replaced, empty when nothing was)
+    """
+    found: dict[str, dict[str, int]] = {}
+    result = df
+    for col in df.columns:
+        series = df[col]
+        if not pd.api.types.is_string_dtype(series):
+            continue
+        text = series.dropna().astype(str)
+        placeholders = text[text.str.match(_MISSING_PLACEHOLDER_PATTERN)]
+        if placeholders.empty:
+            continue
+
+        found[str(col)] = {str(k): int(v) for k, v in placeholders.str.strip().value_counts().items()}
+        cleaned = series.mask(series.index.isin(placeholders.index))
+        numbers = pd.to_numeric(cleaned, errors="coerce")
+        if cleaned.notna().any() and numbers.notna().sum() == cleaned.notna().sum():
+            cleaned = numbers.convert_dtypes(dtype_backend="numpy_nullable")
+        if result is df:
+            result = df.copy()  # the caller's frame is never modified
+        result[col] = cleaned
+    return result, found
+
 
 def detect_encoding(file_path: Path, chardet_sample_size: int = 200_000, min_confidence: float = 0.5) -> str:
     """
