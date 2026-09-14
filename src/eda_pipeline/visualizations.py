@@ -9,12 +9,14 @@ matplotlib.use("Agg")  # Headless backend
 import logging
 import warnings
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib import MatplotlibDeprecationWarning
 
+from .relationships import correlation_ratio
 from .type_inference import coerce_to_datetime, parse_time_of_day
 
 logger = logging.getLogger(__name__)
@@ -566,6 +568,164 @@ def plot_target_vs_categorical(
     return True
 
 
+# A pair plot draws every pair of the chosen columns, so its panels grow with the square of them: six
+# columns are 36 panels and take about 8 s on penguins_lter; past that, a panel is too small to read.
+# Its cost grows with the columns, not the rows (3 columns: 2.4 s for 1 000 rows, 3.4 s for 5 000), so
+# a random sample of rows keeps large tables fast without losing the shape of the cloud.
+PAIR_PLOT_MIN_COLUMNS = 3
+PAIR_PLOT_MAX_COLUMNS = 6
+PAIR_PLOT_MAX_ROWS = 2000
+
+# The pair plot is coloured by a group only when that group actually separates the variables: a mean
+# correlation ratio (eta) of at least 0.25, Cohen's medium effect (eta squared about 0.06). Measured
+# over the 19 datasets in data/raw, that colours penguins by species (0.81), stroke by work_type (0.42)
+# and leaves uncoloured the groupings that separate nothing, such as product_line in sales (0.07).
+PAIR_PLOT_MIN_HUE_ETA = 0.25
+PAIR_PLOT_MAX_GROUPS = PIE_MAX_CATEGORIES
+PAIR_PLOT_MIN_GROUP_ROWS = 10  # a smaller group shows no pattern and cannot draw a distribution
+
+
+@dataclass
+class PairPlotSpec:
+    """What the pair plot draws and why, reported next to the chart and in summary.json."""
+
+    columns: list[str]
+    hue: str | None
+    hue_reason: str  # "target", "grupo" or "" when uncoloured
+    hue_eta: float | None  # mean eta of the colouring group with the columns
+    best_group: str | None  # the eligible grouping that separated the columns most, used or not
+    best_eta: float | None
+    rows_available: int  # complete rows for the columns (and the group)
+    rows_plotted: int
+    max_rows: int
+
+
+def pair_plot_rows(df: pd.DataFrame, columns: list[str], hue: str | None, max_rows: int) -> pd.DataFrame:
+    """The rows a pair plot draws: complete for its columns and group, and a fixed random sample above max_rows."""
+    keep = columns + ([hue] if hue else [])
+    rows = df[keep].dropna()
+    if len(rows) > max_rows:
+        rows = rows.sample(max_rows, random_state=42)
+    return rows
+
+
+def _pair_plot_columns(df: pd.DataFrame, continuous: list[str]) -> list[str]:
+    """Up to PAIR_PLOT_MAX_COLUMNS columns, those in the strongest correlations first, kept in dataset order."""
+    if len(continuous) <= PAIR_PLOT_MAX_COLUMNS:
+        return continuous
+    chosen: list[str] = []
+    corr = df[continuous].astype(float).corr()
+    for first, second, _ in top_correlated_pairs(corr, limit=len(continuous) ** 2):
+        for col in (first, second):
+            if col not in chosen and len(chosen) < PAIR_PLOT_MAX_COLUMNS:
+                chosen.append(col)
+    for col in continuous:  # columns whose correlations are all undefined
+        if col not in chosen and len(chosen) < PAIR_PLOT_MAX_COLUMNS:
+            chosen.append(col)
+    return [col for col in continuous if col in chosen]
+
+
+def _mean_eta(df: pd.DataFrame, group: str, columns: list[str]) -> float | None:
+    etas = [correlation_ratio(df[group], df[col].astype(float)) for col in columns]
+    etas = [float(eta) for eta in etas if pd.notna(eta)]
+    return sum(etas) / len(etas) if etas else None
+
+
+def _usable_group(df: pd.DataFrame, columns: list[str], group: str, max_rows: int) -> bool:
+    """2 to PAIR_PLOT_MAX_GROUPS groups, each with at least PAIR_PLOT_MIN_GROUP_ROWS rows in what is drawn."""
+    sizes = pair_plot_rows(df, columns, group, max_rows)[group].value_counts()
+    return 2 <= len(sizes) <= PAIR_PLOT_MAX_GROUPS and int(sizes.min()) >= PAIR_PLOT_MIN_GROUP_ROWS
+
+
+def choose_pair_plot(
+    df: pd.DataFrame,
+    column_types: dict[str, str],
+    target_column: str | None = None,
+    target_type: str | None = None,
+    max_rows: int = PAIR_PLOT_MAX_ROWS,
+) -> PairPlotSpec | None:
+    """
+    Decide the pair plot's columns and colouring group, or None when there are fewer than 3 continuous columns.
+
+    The columns are the continuous numeric ones; discrete ones fall in stripes and work better as groups.
+    A classification target colours the plot whenever it can; otherwise the categorical column that best
+    separates the columns does, if it separates them at least by PAIR_PLOT_MIN_HUE_ETA.
+    """
+    continuous = [c for c, t in column_types.items() if t == "numeric_continuous" and c in df.columns]
+    if len(continuous) < PAIR_PLOT_MIN_COLUMNS:
+        return None
+    columns = _pair_plot_columns(df, continuous)
+
+    candidates = []
+    for col, semantic_type in column_types.items():
+        if col not in df.columns or col in columns:
+            continue
+        if semantic_type not in ("categorical", "boolean", "numeric_discrete"):
+            continue
+        if not _usable_group(df, columns, col, max_rows):
+            continue
+        eta = _mean_eta(df, col, columns)
+        if eta is not None:
+            candidates.append((eta, col))
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    best_eta, best_group = candidates[0] if candidates else (None, None)
+
+    hue, reason, hue_eta = None, "", None
+    if (
+        target_type == "classification"
+        and target_column in df.columns
+        and target_column not in columns
+        and _usable_group(df, columns, target_column, max_rows)
+    ):
+        hue, reason, hue_eta = target_column, "target", _mean_eta(df, target_column, columns)
+    elif best_eta is not None and best_eta >= PAIR_PLOT_MIN_HUE_ETA:
+        hue, reason, hue_eta = best_group, "grupo", best_eta
+
+    return PairPlotSpec(
+        columns=columns,
+        hue=hue,
+        hue_reason=reason,
+        hue_eta=hue_eta,
+        best_group=best_group,
+        best_eta=best_eta,
+        rows_available=len(df[columns + ([hue] if hue else [])].dropna()),
+        rows_plotted=len(pair_plot_rows(df, columns, hue, max_rows)),
+        max_rows=max_rows,
+    )
+
+
+@safe_plot
+def plot_pair_plot(df: pd.DataFrame, spec: PairPlotSpec | None, output_path: Path) -> bool:
+    """Every pair of the chosen columns, and each column's distribution on the diagonal, per group when coloured."""
+    if spec is None:
+        return False
+    rows = pair_plot_rows(df, spec.columns, spec.hue, spec.max_rows)
+    if len(rows) < 2:
+        return False
+
+    data = rows[spec.columns].astype(float)
+    options = {"vars": spec.columns, "plot_kws": {"s": 12, "alpha": 0.6, "edgecolor": "none"}}
+    if spec.hue:
+        data[spec.hue] = rows[spec.hue].astype(str)
+        options |= {
+            "hue": spec.hue,
+            "hue_order": list(data[spec.hue].value_counts().index),
+            "diag_kind": "kde",
+            # Each group's curve integrates to 1, so shapes compare even when one group is small: with a
+            # shared scale the 5% of stroke cases draw a flat line under the other 95%.
+            "diag_kws": {"warn_singular": False, "common_norm": False},
+        }
+    else:
+        options["diag_kind"] = "hist"
+
+    height = 2.2 if len(spec.columns) > 4 else 2.8
+    grid = sns.pairplot(data, height=height, **options)
+    title = "Pair Plot" + (f": por {spec.hue}" if spec.hue else "")
+    grid.figure.suptitle(title, y=1.02)
+    grid.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
 def generate_all_visualizations(
     df: pd.DataFrame,
     column_types: dict[str, str],
@@ -580,6 +740,7 @@ def generate_all_visualizations(
     target_column: str | None = None,
     target_type: str | None = None,
     time_cols: list[str] | None = None,
+    pair_plot: PairPlotSpec | None = None,
 ) -> dict[str, list[str]]:
     """
     Generate all standard visualizations.
@@ -672,6 +833,10 @@ def generate_all_visualizations(
             scatter_files.append(str(output_file))
 
     plot_files["scatter"] = scatter_files
+
+    # Pair plot of the numeric variables, coloured by a group when one separates them (see choose_pair_plot)
+    pair_file = output_dir / "pair_plot.png"
+    plot_files["pair_plot"] = [str(pair_file)] if plot_pair_plot(df, pair_plot, pair_file) else []
 
     # Time series plots
     logger.info(f"Generating {len(datetime_cols)} time series plots...")

@@ -12,7 +12,7 @@ import pandas as pd
 from jinja2 import Template
 
 from .type_inference import dtype_label, semantic_type_label
-from .visualizations import PIE_MAX_CATEGORIES
+from .visualizations import PAIR_PLOT_MIN_HUE_ETA, PIE_MAX_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -704,6 +704,31 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
         {% endif %}
 
+        {% if plots.pair_plot and pair_plot %}
+        <h3>Pair Plot: Relaciones entre Variables Numéricas</h3>
+        <p style="color: #555; margin-top: -8px;">
+            Cada panel cruza dos de estas variables: <strong>{{ pair_plot.columns | join(", ") }}</strong>.
+            En la diagonal, la distribución de cada una{% if pair_plot.hue %} por grupo{% endif %}.
+            {% if pair_plot.hue_reason == "target" %}
+            Coloreado por el target <strong>{{ pair_plot.hue }}</strong>.
+            {% elif pair_plot.hue %}
+            Coloreado por <strong>{{ pair_plot.hue }}</strong>, la variable categórica que más separa estas columnas
+            (η medio {{ "%.2f" | format(pair_plot.hue_eta) }}).
+            {% elif pair_plot.best_group %}
+            Sin colorear: la variable categórica que más separa estas columnas, <strong>{{ pair_plot.best_group }}</strong>,
+            solo llega a un η medio de {{ "%.2f" | format(pair_plot.best_eta) }} (se colorea desde {{ "%.2f" | format(pair_plot_min_eta) }}).
+            {% else %}
+            Sin colorear: no hay una variable categórica de 2 a 6 grupos con suficientes filas en cada uno.
+            {% endif %}
+            {% if pair_plot.rows_plotted < pair_plot.rows_available %}
+            Muestra aleatoria de {{ pair_plot.rows_plotted }} de las {{ pair_plot.rows_available }} filas completas.
+            {% endif %}
+        </p>
+        <div class="plot-container">
+            <img src="data:image/png;base64,{{ plots.pair_plot[0] }}" alt="Pair plot">
+        </div>
+        {% endif %}
+
         {% if plots.timeseries %}
         <h3>Series Temporales ({{ plots.timeseries | length }})</h3>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
@@ -755,6 +780,7 @@ def generate_html_report(
     column_dtypes: Optional[dict] = None,
     data_preview: Optional[pd.DataFrame] = None,
     time_stats: Optional[dict] = None,
+    pair_plot=None,
 ) -> str:
     """
     Generate HTML report with embedded base64 images.
@@ -766,6 +792,7 @@ def generate_html_report(
         column_dtypes: Storage dtype per column (int64, float64, str, ...), shown next to it.
         data_preview: The analysed DataFrame; its first rows open the report body.
         time_stats: ``{column: TimeOfDayStats}`` for the time-of-day columns.
+        pair_plot: The ``PairPlotSpec`` the pair plot was drawn from, described next to it.
 
     Returns:
         Path to generated HTML file
@@ -796,6 +823,8 @@ def generate_html_report(
         "numeric_stats": numeric_stats,
         "categorical_stats": categorical_stats,
         "time_stats": time_stats or {},
+        "pair_plot": pair_plot,
+        "pair_plot_min_eta": PAIR_PLOT_MIN_HUE_ETA,
         "correlations": correlations,
         "numeric_pairs": correlations.get("numeric_pairs", []),
         "categorical_pairs": correlations.get("categorical_pairs", []),

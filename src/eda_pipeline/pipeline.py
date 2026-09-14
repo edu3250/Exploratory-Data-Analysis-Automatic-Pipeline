@@ -6,6 +6,7 @@ import difflib
 import json
 import traceback
 from collections import Counter
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
@@ -30,7 +31,7 @@ from .type_inference import (
     infer_all_types,
 )
 from .univariate_analysis import UnivariateReport, analyze_univariate
-from .visualizations import generate_all_visualizations
+from .visualizations import choose_pair_plot, generate_all_visualizations
 
 
 class TargetColumnNotFoundError(ValueError):
@@ -417,6 +418,18 @@ class EDAPipeline:
             combined_alerts.append(target_missing_alert)
         combined_alerts.sort(key=lambda a: (SEVERITY_ORDER.get(a.severity, 999), a.column or ""))
 
+        self.logger.info("Choosing the pair plot...")
+        pair_plot = self._run_step(
+            "pair_plot",
+            failed_steps,
+            choose_pair_plot,
+            df,
+            column_types,
+            target_column=target_column,
+            target_type=target_report.target_type if target_report else None,
+            default=None,
+        )
+
         self.logger.info("Generating visualizations...")
         output_dir = self._dataset_output_dir(dataset_name, batch_dir)
         plots_dir = output_dir / "plots"
@@ -439,6 +452,7 @@ class EDAPipeline:
                 target_column=target_column,
                 target_type=target_report.target_type if target_report else None,
                 time_cols=time_cols,
+                pair_plot=pair_plot,
                 default={},
             )
             or {}
@@ -501,6 +515,7 @@ class EDAPipeline:
             column_dtypes=column_dtypes,
             data_preview=df,
             time_stats=univariate_report.time_stats,
+            pair_plot=pair_plot,
             default=None,
         )
 
@@ -553,6 +568,7 @@ class EDAPipeline:
                     "note": outliers_report.multivariate_note,
                 },
             },
+            "pair_plot": asdict(pair_plot) if pair_plot else None,
             "failed_steps": failed_steps,
         }
 

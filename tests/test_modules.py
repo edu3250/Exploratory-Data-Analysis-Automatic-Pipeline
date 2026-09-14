@@ -50,11 +50,16 @@ from eda_pipeline.univariate_analysis import (
     analyze_univariate,
 )
 from eda_pipeline.visualizations import (
+    PAIR_PLOT_MAX_COLUMNS,
+    PAIR_PLOT_MIN_GROUP_ROWS,
+    PAIR_PLOT_MIN_HUE_ETA,
     PIE_MAX_CATEGORIES,
     TARGET_BAR_MAX_CLASSES,
+    choose_pair_plot,
     format_share,
     pie_chart_shares,
     pie_slice_label,
+    plot_pair_plot,
     plot_pie_chart,
     plot_target_vs_categorical,
     plot_time_of_day,
@@ -1021,6 +1026,87 @@ class TestRelationships:
         )
         eta = correlation_ratio(cat, num)
         assert eta > 0.5  # Should be highly associated
+
+
+class TestPairPlot:
+    """One pair plot of the numeric variables, coloured by the group that best separates them."""
+
+    @staticmethod
+    def _penguins(n: int = 300) -> tuple[pd.DataFrame, dict[str, str]]:
+        rng = np.random.default_rng(0)
+        species = np.array(["Adelie", "Gentoo", "Chinstrap"])[np.arange(n) % 3]
+        offset = pd.Series(species).map({"Adelie": 0.0, "Gentoo": 10.0, "Chinstrap": 5.0}).to_numpy()
+        df = pd.DataFrame(
+            {
+                "pico": 40 + offset + rng.normal(0, 1, n),
+                "aleta": 190 + 2 * offset + rng.normal(0, 2, n),
+                "masa": 3500 + 100 * offset + rng.normal(0, 50, n),
+                "especie": species,
+                "isla": rng.choice(["Biscoe", "Dream"], n),  # unrelated to the measures
+            }
+        )
+        types = {"pico": "numeric_continuous", "aleta": "numeric_continuous", "masa": "numeric_continuous"}
+        types |= {"especie": "categorical", "isla": "categorical"}
+        return df, types
+
+    def test_colours_by_the_group_that_best_separates_the_variables(self):
+        df, types = self._penguins()
+        spec = choose_pair_plot(df, types)
+        assert spec.columns == ["pico", "aleta", "masa"]
+        assert spec.hue == "especie"
+        assert spec.hue_eta > 0.9
+
+    def test_a_group_that_separates_nothing_is_not_used(self):
+        df, types = self._penguins()
+        df = df.drop(columns="especie")
+        types.pop("especie")
+        spec = choose_pair_plot(df, types)
+        assert spec.hue is None  # isla is unrelated to the measures
+        assert spec.best_eta < PAIR_PLOT_MIN_HUE_ETA
+
+    def test_a_classification_target_is_the_group_even_if_weak(self):
+        df, types = self._penguins()
+        df["objetivo"] = np.arange(len(df)) % 2
+        types["objetivo"] = "boolean"
+        spec = choose_pair_plot(df, types, target_column="objetivo", target_type="classification")
+        assert spec.hue == "objetivo"
+
+    def test_groups_too_many_or_too_small_are_skipped(self):
+        df, types = self._penguins()
+        df["especie"] = df["especie"].where(np.arange(len(df)) >= PAIR_PLOT_MIN_GROUP_ROWS * 3, "Emperador")
+        df.loc[: PAIR_PLOT_MIN_GROUP_ROWS - 2, "especie"] = "Rey"  # a group below the minimum size
+        df["lote"] = [f"L{i % 8}" for i in range(len(df))]  # eight groups: too many to tell apart
+        types["lote"] = "categorical"
+        spec = choose_pair_plot(df, types)
+        assert spec.hue != "especie"
+        assert spec.hue != "lote"
+
+    def test_needs_at_least_three_continuous_columns(self):
+        df, types = self._penguins()
+        types["masa"] = "numeric_discrete"  # a discrete column is not an axis
+        assert choose_pair_plot(df, types) is None
+
+    def test_keeps_the_most_related_columns_when_there_are_too_many(self):
+        df, types = self._penguins()
+        rng = np.random.default_rng(1)
+        for i in range(PAIR_PLOT_MAX_COLUMNS):
+            df[f"ruido_{i}"] = rng.normal(size=len(df))
+            types[f"ruido_{i}"] = "numeric_continuous"
+        spec = choose_pair_plot(df, types)
+        assert len(spec.columns) == PAIR_PLOT_MAX_COLUMNS
+        assert {"pico", "aleta", "masa"} <= set(spec.columns)
+
+    def test_large_datasets_are_sampled(self):
+        df, types = self._penguins(n=6000)
+        spec = choose_pair_plot(df, types, max_rows=1000)
+        assert spec.rows_plotted == 1000
+        assert spec.rows_available == 6000
+
+    def test_writes_the_pair_plot(self, tmp_output_dir):
+        df, types = self._penguins()
+        output = tmp_output_dir / "pair_plot.png"
+        assert plot_pair_plot(df, choose_pair_plot(df, types), output) is True
+        assert output.exists()
 
 
 class TestScatterPairs:
