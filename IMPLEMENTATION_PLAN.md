@@ -374,3 +374,25 @@ Verified with real output:
 - Differential run over the 17 datasets, `main` against the branch, Isolation Forest share (and rows with any outlier): `Order_Details` 10.0% → 0.6% (18.3% → 14.2%), `stroke` 9.6% → 1.5% (15.5% → 14.0%), `ecommerce` 9.0% → 1.5% (12.7% → 6.7%), `Dates` 8.5% → 0% (8.5% → 0%), but `Inventory` 10.0% → 12.1% (12.9% → 14.4%) and `siniestros` 10.2% → 12.8%. `Sales_Outlet` (5 rows) is no longer scored. The outlier step takes about twice as long (`Order_Details` 3.9 s → 6.0 s).
 - The Vistara batch regenerated on `main` (`reports/Vistara_batch_20260913_121354`) matches the differential run: `Order_Details` 40 184 → 31 122 rows with an outlier (14.2%), of which Isolation Forest flags 1 272 above a score of 0.707; `Dates` 31 → 0; `Inventory` 7 570 → 8 461; `Sales_Outlet` reads «No aplicado: 5 filas completas». All 8 files match their CSV row counts, none has a failed step, and the alerts are unchanged.
 - Known limit: the fence is relative. On a dataset with no anomaly it still flags the most isolated 1–2% of rows, so the report reads as "most isolated rows", not as errors.
+
+## Stage 18: Pie charts in percentages for categorical columns
+**Goal**: The categorical distributions were bar charts of raw counts only. The user asked for pie charts explained in percentages, except for columns with too many categories to read as a pie, and left that criterion to Claude.
+
+**Success Criteria**:
+- Each categorical column with 2 to 6 categories gets a pie in a «Proporciones Categóricas» block right below «Distribuciones Categóricas»; columns with more keep their bars only.
+- Shares are computed over the rows that have a value, most frequent first.
+- Only slices of at least 5% carry their share inside the pie; the legend names every category with its share and row count, and a share that would round to zero reads `<0.1 %`.
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (all failed before the code existed):
+- `tests/test_modules.py::TestCategoricalPieChart`: 8 tests over the shares (sum and order, missing values left out), the category limit (6 still gets a pie; 7, or a single category, gets none), the inside label of a thin slice, `<0.1 %`, and that the file is or is not written.
+- `tests/test_integration.py::TestOutputCompleteness::test_categorical_columns_with_few_categories_get_a_pie`.
+
+**Status**: COMPLETE. PR #22 was merged on 2026-09-13 as `7001ca0`, and its branch was deleted.
+
+Verified with real output:
+- **209 tests passed** on the branch, 0 failed, 0 warnings (200 + 9 new). Ruff clean. `main` after the merge: **209 passed**, ruff clean.
+- The limit was measured before the code: over the 19 datasets in `data/raw`, 66 of the 101 categorical columns have 5 categories or fewer, none has 6, and the next ones hold 7 to 10 slices of similar size (`año`, ten slices of about 10%; `estado_civil`, nine, one under 0.1%). A cut at 5 or 6 selects the same columns; 6 is also where a pie stops reading as part-to-whole.
+- Rendered and checked by eye on `discount_pct`, `quantity`, `product_category`, and stroke's `gender` (`Other: <0.1 % (1)`), `work_type` and `ever_married`. The palette validator of the dataviz guidance needs Node, which is not installed; the report's palette was kept, and no slice depends on colour alone.
+- On the new penguin datasets (`reports/penguins_batch_20260913_181715`), `penguins_size` gets 3 pies (species, island, sex) and `penguins_lter` 5 (studyName, Species, Island, Sex, Clutch Completion); `Comments` (7 categories) and `Date Egg` (50) keep bars only. The species shares match the CSV: 44.2% / 36.0% / 19.8%.
+- The Vistara batch regenerated on `main` (`reports/Vistara_batch_20260913_181954`) holds 15 pies across its 8 files, among them `Products.product_category` and `Order_Details` `discount_pct` and `quantity`; `product_id` (40), `month_name` (12), `product_type` (19) and `color` (14) keep bars only. Outlier counts and alerts are identical to the previous batch, and no file has a failed step.
