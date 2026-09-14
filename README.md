@@ -404,6 +404,13 @@ explica en la columna `nota` y el reporte lista las columnas sin IQR.
 - **Multicolinealidad**: VIF (Variance Inflation Factor)
 - **Gráficos de dispersión**: los `max_scatter_pairs` pares numéricos con mayor correlación en valor
   absoluto (|r|), del más fuerte al más débil, con su r en el título
+- **Escala logarítmica**: una columna numérica continua se dibuja además en escala logarítmica cuando
+  se cumplen tres condiciones a la vez: el 90 % central de sus filas ocupa menos del 30 % del eje, el
+  logaritmo al menos duplica ese espacio y como mucho el 5 % de sus valores son 0 o negativos. La
+  versión logarítmica nunca reemplaza a la lineal: en histogramas, boxplots y gráficos de dispersión va
+  a la derecha de la lineal, en la misma imagen; el pair plot se repite debajo con log10 en esas columnas.
+  Los puntos con valor 0 o negativo quedan fuera del panel logarítmico y se indica cuántos. La medición
+  de cada columna elegida queda en `summary.json → log_scale_columns`.
 - **Pair plot**: debajo de los gráficos de dispersión, un pair plot con las columnas numéricas continuas
   (hace falta al menos 3; si hay más de 6, las 6 con correlaciones más fuertes). Cada panel cruza dos
   variables y la diagonal muestra la distribución de cada una. Se colorea por grupo cuando hay uno que

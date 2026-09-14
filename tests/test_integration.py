@@ -472,6 +472,43 @@ class TestOutputCompleteness:
         outliers_section = html[html.index('<section id="outliers">') :]
         assert "discount_pct" in outliers_section[: outliers_section.index("</section>")]
 
+    def test_skewed_amounts_get_a_log_scale_next_to_the_linear_charts(self, tmp_output_dir):
+        """credito_asegurado's amounts crowded every point near zero in histograms, boxplots, scatter and pair plot."""
+        import matplotlib.image as mpimg
+        import numpy as np
+
+        rng = np.random.default_rng(0)
+        n = 1500
+        monto = rng.lognormal(mean=13, sigma=2.5, size=n)
+        df = pd.DataFrame(
+            {
+                "monto": monto,
+                "saldo": monto * rng.uniform(0.3, 1.0, n),
+                "plazo": rng.normal(240, 60, n),
+            }
+        )
+        csv_file = tmp_output_dir / "creditos.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["creditos"]
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        assert summary["failed_steps"] == []
+        assert set(summary["log_scale_columns"]) == {"monto", "saldo"}
+
+        plots_dir = Path(result["output_dir"]) / "plots"
+        plots = {p.name for p in plots_dir.glob("*.png")}
+        assert {"pair_plot.png", "pair_plot_log.png"} <= plots
+        width = {
+            name: mpimg.imread(plots_dir / name).shape[1] for name in ("histogram_monto.png", "histogram_plazo.png")
+        }
+        assert width["histogram_monto.png"] > 1.5 * width["histogram_plazo.png"]  # linear and log side by side
+
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        assert "escala logarítmica" in html
+        assert html.count('alt="Pair plot') == 2  # the linear pair plot stays, the log one follows it
+
     def test_pair_plot_follows_the_scatter_plots_and_names_its_group(self, tmp_output_dir):
         """A pair plot of the numeric variables, coloured by the group that separates them, below the scatter plots."""
         n = 240

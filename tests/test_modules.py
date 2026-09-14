@@ -1028,6 +1028,104 @@ class TestRelationships:
         assert eta > 0.5  # Should be highly associated
 
 
+class TestLogScale:
+    """Rule D: log scale only when the middle of the data is squeezed, the log fixes it, and few values are <= 0."""
+
+    @staticmethod
+    def _amounts(n: int = 2000, seed: int = 0) -> pd.Series:
+        return pd.Series(np.random.default_rng(seed).lognormal(mean=13, sigma=2.5, size=n), name="monto")
+
+    def test_skewed_amounts_need_a_log_scale(self):
+        from eda_pipeline.visualizations import LOG_SCALE_MAX_CENTRAL_SHARE, check_log_scale
+
+        check = check_log_scale(self._amounts())
+        assert check.needed
+        assert check.central_share < LOG_SCALE_MAX_CENTRAL_SHARE
+        assert check.central_share_log >= 2 * check.central_share
+
+    def test_a_symmetric_measure_does_not(self):
+        from eda_pipeline.visualizations import check_log_scale
+
+        series = pd.Series(np.random.default_rng(0).normal(4000, 500, 2000), name="masa")
+        assert not check_log_scale(series).needed
+
+    def test_many_values_at_or_below_zero_rule_it_out(self):
+        # prima_cedida: 84% zeros. A log axis would silently drop most of the rows.
+        from eda_pipeline.visualizations import check_log_scale
+
+        values = self._amounts()
+        values.iloc[::10] = 0.0  # 10% zeros
+        check = check_log_scale(values)
+        assert not check.needed
+        assert check.nonpositive_pct == pytest.approx(10.0)
+
+    def test_a_few_values_at_or_below_zero_are_allowed_and_counted(self):
+        from eda_pipeline.visualizations import check_log_scale
+
+        values = self._amounts()
+        values.iloc[::50] = -5.0  # 2%
+        check = check_log_scale(values)
+        assert check.needed
+        assert check.nonpositive_count == 40
+
+    def test_no_gain_from_the_log_means_no_log(self):
+        # The middle 90% is a single value: no scale spreads it, linear or log.
+        from eda_pipeline.visualizations import check_log_scale
+
+        values = pd.Series([100.0] * 1940 + list(np.linspace(1e3, 1e7, 60)), name="tarifa")
+        assert not check_log_scale(values).needed
+
+    def test_only_continuous_columns_are_checked(self):
+        from eda_pipeline.visualizations import log_scale_columns
+
+        df = pd.DataFrame(
+            {"monto": self._amounts(), "saldo": self._amounts(seed=1), "masa": np.linspace(3000, 5000, 2000)}
+        )
+        types = {"monto": "numeric_continuous", "saldo": "numeric_discrete", "masa": "numeric_continuous"}
+        assert set(log_scale_columns(df, types)) == {"monto"}
+
+    @staticmethod
+    def _width(path) -> int:
+        import matplotlib.image as mpimg
+
+        return mpimg.imread(path).shape[1]
+
+    def test_histogram_with_log_scale_keeps_the_linear_one_beside_it(self, tmp_output_dir):
+        from eda_pipeline.visualizations import plot_histogram
+
+        amounts = self._amounts()
+        assert plot_histogram(amounts, tmp_output_dir / "lineal.png") is True
+        assert plot_histogram(amounts, tmp_output_dir / "log.png", log_scale=True) is True
+        assert self._width(tmp_output_dir / "log.png") > 1.5 * self._width(tmp_output_dir / "lineal.png")
+
+    def test_boxplot_with_log_scale_keeps_the_linear_one_beside_it(self, tmp_output_dir):
+        from eda_pipeline.visualizations import plot_boxplot
+
+        amounts = self._amounts()
+        assert plot_boxplot(amounts, tmp_output_dir / "lineal.png") is True
+        assert plot_boxplot(amounts, tmp_output_dir / "log.png", log_scale=True) is True
+        assert self._width(tmp_output_dir / "log.png") > 1.5 * self._width(tmp_output_dir / "lineal.png")
+
+    def test_scatter_with_log_scale_keeps_the_linear_one_beside_it(self, tmp_output_dir):
+        from eda_pipeline.visualizations import plot_scatter
+
+        x = self._amounts()
+        y = (x * np.random.default_rng(2).uniform(0.5, 1.0, len(x))).rename("saldo")
+        assert plot_scatter(x, y, tmp_output_dir / "lineal.png") is True
+        assert plot_scatter(x, y, tmp_output_dir / "log.png", log_x=True, log_y=True) is True
+        assert self._width(tmp_output_dir / "log.png") > 1.5 * self._width(tmp_output_dir / "lineal.png")
+
+    def test_pair_plot_log_version_is_written(self, tmp_output_dir):
+        from eda_pipeline.visualizations import choose_pair_plot, plot_pair_plot
+
+        x = self._amounts()
+        df = pd.DataFrame({"monto": x, "saldo": x * 0.8, "plazo": np.linspace(12, 360, len(x))})
+        spec = choose_pair_plot(df, dict.fromkeys(df.columns, "numeric_continuous"))
+        output = tmp_output_dir / "pair_plot_log.png"
+        assert plot_pair_plot(df, spec, output, log_columns={"monto", "saldo"}) is True
+        assert output.exists()
+
+
 class TestPairPlot:
     """One pair plot of the numeric variables, coloured by the group that best separates them."""
 

@@ -3,6 +3,7 @@ Visualization generation: plots saved as PNG with proper handling of edge cases.
 """
 
 import matplotlib
+import numpy as np
 import pandas as pd
 
 matplotlib.use("Agg")  # Headless backend
@@ -70,38 +71,141 @@ def safe_plot(func):
     return wrapper
 
 
+# Rule D, measured over the 56 distinct continuous columns of the 19 datasets in data/raw. A column gets
+# a log scale when three things hold at once:
+# 1. its middle 90% of rows is squeezed into under 30% of the axis (the symptom itself: in 10 mortgage
+#    columns it sat in under 1%, while columns that read well use more than 40%);
+# 2. the log at least doubles that space, so the log actually fixes it;
+# 3. at most 5% of the values are zero or negative, since those cannot go on a log axis.
+# Skewness alone was rejected: it flagged line_total, which reads fine, and columns of mostly zeros where
+# the log would hide most rows (waste_pct 90%, prima_cedida 84%). Orders of magnitude between p1 and p99
+# was rejected too: it flagged marketing_spend and total_revenue, which the log does not improve.
+LOG_SCALE_MAX_CENTRAL_SHARE = 0.30
+LOG_SCALE_MIN_GAIN = 2.0
+LOG_SCALE_MAX_NONPOSITIVE_PCT = 5.0
+LOG_SCALE_MIN_VALUES = 20
+
+
+@dataclass
+class LogScaleCheck:
+    """Rule D measured on one column, reported in summary.json."""
+
+    needed: bool
+    central_share: float  # share of the axis (min..max) holding the middle 90% of the rows
+    central_share_log: float  # the same on log10 of the positive values
+    nonpositive_pct: float
+    nonpositive_count: int
+
+
+def _central_share(values: np.ndarray) -> float:
+    span = values.max() - values.min()
+    if span <= 0:
+        return 1.0
+    p5, p95 = np.percentile(values, [5, 95])
+    return float((p95 - p5) / span)
+
+
+def check_log_scale(series: pd.Series) -> LogScaleCheck | None:
+    """Measure rule D on a numeric column; None when it has too few values to judge."""
+    values = pd.to_numeric(series, errors="coerce").dropna().astype(float).to_numpy()
+    if len(values) < LOG_SCALE_MIN_VALUES:
+        return None
+    positive = values[values > 0]
+    nonpositive = len(values) - len(positive)
+    nonpositive_pct = nonpositive / len(values) * 100
+    central = _central_share(values)
+    central_log = _central_share(np.log10(positive)) if len(positive) >= LOG_SCALE_MIN_VALUES else 0.0
+    needed = (
+        central < LOG_SCALE_MAX_CENTRAL_SHARE
+        and central_log >= LOG_SCALE_MIN_GAIN * central
+        and central_log > central  # a middle squeezed to one value stays squeezed on any scale
+        and nonpositive_pct <= LOG_SCALE_MAX_NONPOSITIVE_PCT
+    )
+    return LogScaleCheck(
+        needed=needed,
+        central_share=central,
+        central_share_log=central_log,
+        nonpositive_pct=nonpositive_pct,
+        nonpositive_count=nonpositive,
+    )
+
+
+def log_scale_columns(df: pd.DataFrame, column_types: dict[str, str]) -> dict[str, LogScaleCheck]:
+    """The continuous columns that rule D puts on a log scale, with their measurements."""
+    chosen = {}
+    for col, semantic_type in column_types.items():
+        if semantic_type != "numeric_continuous" or col not in df.columns:
+            continue
+        check = check_log_scale(df[col])
+        if check is not None and check.needed:
+            chosen[col] = check
+    return chosen
+
+
+def _log_panel_title(dropped: int) -> str:
+    return "Escala logarítmica" + (f" ({dropped} valores ≤ 0 fuera)" if dropped else "")
+
+
 @safe_plot
-def plot_histogram(series: pd.Series, output_path: Path) -> bool:
-    """Plot histogram with KDE."""
+def plot_histogram(series: pd.Series, output_path: Path, log_scale: bool = False) -> bool:
+    """Histogram with KDE; with log_scale, the linear one on the left and the log one on the right."""
     valid = series.dropna()
     if len(valid) < 2:
         return False
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    if len(valid.unique()) > 1:
-        sns.histplot(valid, kde=True, ax=ax, bins=30)
+    if not log_scale:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        _draw_histogram(ax, valid)
+        ax.set_title(f"Distribución: {series.name}")
+        ax.set_xlabel(series.name)
     else:
-        ax.hist(valid, bins=1)
-    ax.set_title(f"Distribución: {series.name}")
-    ax.set_xlabel(series.name)
-    ax.set_ylabel("Frecuencia")
+        fig, (linear, log) = plt.subplots(1, 2, figsize=(16, 6))
+        _draw_histogram(linear, valid)
+        linear.set_title("Escala lineal")
+        linear.set_xlabel(series.name)
+        positive = valid[valid > 0].astype(float)
+        sns.histplot(positive, kde=True, ax=log, bins=30, log_scale=True)
+        log.set_title(_log_panel_title(len(valid) - len(positive)))
+        log.set_xlabel(f"{series.name} (log)")
+        log.set_ylabel("Frecuencia")
+        fig.suptitle(f"Distribución: {series.name}")
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     return True
 
 
+def _draw_histogram(ax, valid: pd.Series) -> None:
+    if len(valid.unique()) > 1:
+        sns.histplot(valid, kde=True, ax=ax, bins=30)
+    else:
+        ax.hist(valid, bins=1)
+    ax.set_ylabel("Frecuencia")
+
+
 @safe_plot
-def plot_boxplot(series: pd.Series, output_path: Path) -> bool:
-    """Plot boxplot."""
+def plot_boxplot(series: pd.Series, output_path: Path, log_scale: bool = False) -> bool:
+    """Boxplot; with log_scale, the linear one on the left and the log one on the right."""
     valid = series.dropna()
     if len(valid) < 2:
         return False
 
-    fig, ax = plt.subplots(figsize=(8, 6))
-    with _suppress_seaborn_boxplot_warning():
-        sns.boxplot(y=valid, ax=ax)
-    ax.set_title(f"Boxplot: {series.name}")
-    ax.set_ylabel(series.name)
+    if not log_scale:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        with _suppress_seaborn_boxplot_warning():
+            sns.boxplot(y=valid, ax=ax)
+        ax.set_title(f"Boxplot: {series.name}")
+        ax.set_ylabel(series.name)
+    else:
+        fig, (linear, log) = plt.subplots(1, 2, figsize=(14, 6))
+        positive = valid[valid > 0].astype(float)
+        with _suppress_seaborn_boxplot_warning():
+            sns.boxplot(y=valid, ax=linear)
+            sns.boxplot(y=positive, ax=log, log_scale=True)
+        linear.set_title("Escala lineal")
+        linear.set_ylabel(series.name)
+        log.set_title(_log_panel_title(len(valid) - len(positive)))
+        log.set_ylabel(f"{series.name} (log)")
+        fig.suptitle(f"Boxplot: {series.name}")
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     return True
@@ -320,9 +424,19 @@ def top_correlated_pairs(corr_matrix: pd.DataFrame, limit: int) -> list[tuple[st
 
 @safe_plot
 def plot_scatter(
-    x: pd.Series, y: pd.Series, output_path: Path, sample_size: int = 1000, r: float | None = None
+    x: pd.Series,
+    y: pd.Series,
+    output_path: Path,
+    sample_size: int = 1000,
+    r: float | None = None,
+    log_x: bool = False,
+    log_y: bool = False,
 ) -> bool:
-    """Plot scatter plot, with the pair's Pearson correlation in the title when it is known."""
+    """
+    Plot scatter plot, with the pair's Pearson correlation in the title when it is known.
+
+    When either axis takes a log scale, the linear plot stays on the left and the log one goes on the right.
+    """
     valid = pd.DataFrame({"x": x, "y": y}).dropna()
     if len(valid) < 2:
         return False
@@ -331,11 +445,29 @@ def plot_scatter(
     if len(valid) > sample_size:
         valid = valid.sample(sample_size, random_state=42)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.scatter(valid["x"], valid["y"], alpha=0.6, s=20)
-    ax.set_title(f"Scatter: {x.name} vs {y.name}" + (f" (r = {r:.2f})" if r is not None else ""))
-    ax.set_xlabel(x.name)
-    ax.set_ylabel(y.name)
+    title = f"Scatter: {x.name} vs {y.name}" + (f" (r = {r:.2f})" if r is not None else "")
+    if not (log_x or log_y):
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.scatter(valid["x"], valid["y"], alpha=0.6, s=20)
+        ax.set_title(title)
+        ax.set_xlabel(x.name)
+        ax.set_ylabel(y.name)
+    else:
+        fig, (linear, log) = plt.subplots(1, 2, figsize=(16, 6))
+        linear.scatter(valid["x"], valid["y"], alpha=0.6, s=20)
+        linear.set_title("Escala lineal")
+        linear.set_xlabel(x.name)
+        linear.set_ylabel(y.name)
+        kept = valid[((valid["x"] > 0) | (not log_x)) & ((valid["y"] > 0) | (not log_y))]
+        log.scatter(kept["x"], kept["y"], alpha=0.6, s=20)
+        if log_x:
+            log.set_xscale("log")
+        if log_y:
+            log.set_yscale("log")
+        log.set_title(_log_panel_title(len(valid) - len(kept)))
+        log.set_xlabel(f"{x.name} (log)" if log_x else x.name)
+        log.set_ylabel(f"{y.name} (log)" if log_y else y.name)
+        fig.suptitle(title)
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     return True
@@ -695,16 +827,30 @@ def choose_pair_plot(
 
 
 @safe_plot
-def plot_pair_plot(df: pd.DataFrame, spec: PairPlotSpec | None, output_path: Path) -> bool:
-    """Every pair of the chosen columns, and each column's distribution on the diagonal, per group when coloured."""
+def plot_pair_plot(
+    df: pd.DataFrame, spec: PairPlotSpec | None, output_path: Path, log_columns: set[str] | None = None
+) -> bool:
+    """
+    Every pair of the chosen columns, and each column's distribution on the diagonal, per group when coloured.
+
+    With log_columns, those columns are drawn as log10 of their values (rows at or below zero in them are
+    left out), for the log version shown next to the linear one.
+    """
     if spec is None:
         return False
     rows = pair_plot_rows(df, spec.columns, spec.hue, spec.max_rows)
+    logged = [col for col in spec.columns if col in (log_columns or set())]
+    if logged:
+        rows = rows[(rows[logged].astype(float) > 0).all(axis=1)]
     if len(rows) < 2:
         return False
 
     data = rows[spec.columns].astype(float)
-    options = {"vars": spec.columns, "plot_kws": {"s": 12, "alpha": 0.6, "edgecolor": "none"}}
+    names = {col: (f"log10({col})" if col in logged else col) for col in spec.columns}
+    for col in logged:
+        data[col] = np.log10(data[col])
+    data = data.rename(columns=names)
+    options = {"vars": [names[col] for col in spec.columns], "plot_kws": {"s": 12, "alpha": 0.6, "edgecolor": "none"}}
     if spec.hue:
         data[spec.hue] = rows[spec.hue].astype(str)
         options |= {
@@ -720,7 +866,11 @@ def plot_pair_plot(df: pd.DataFrame, spec: PairPlotSpec | None, output_path: Pat
 
     height = 2.2 if len(spec.columns) > 4 else 2.8
     grid = sns.pairplot(data, height=height, **options)
-    title = "Pair Plot" + (f": por {spec.hue}" if spec.hue else "")
+    title = (
+        "Pair Plot"
+        + (f": por {spec.hue}" if spec.hue else "")
+        + (" (log10 en " + ", ".join(logged) + ")" if logged else "")
+    )
     grid.figure.suptitle(title, y=1.02)
     grid.savefig(output_path, dpi=100, bbox_inches="tight")
     return True
@@ -741,6 +891,7 @@ def generate_all_visualizations(
     target_type: str | None = None,
     time_cols: list[str] | None = None,
     pair_plot: PairPlotSpec | None = None,
+    log_scale: dict[str, LogScaleCheck] | None = None,
 ) -> dict[str, list[str]]:
     """
     Generate all standard visualizations.
@@ -752,11 +903,14 @@ def generate_all_visualizations(
     plot_files = {}
 
     # Numeric columns: histograms and boxplots
+    # Columns rule D puts on a log scale get it next to the linear chart, never instead of it
+    log_cols = set(log_scale or {})
+
     logger.info(f"Generating {len(numeric_cols)} histograms...")
     hist_files = []
     for col in numeric_cols[: config_viz.max_histograms]:
         output_file = output_dir / f"histogram_{col.replace('/', '_')}.png"
-        if plot_histogram(df[col], output_file):
+        if plot_histogram(df[col], output_file, log_scale=col in log_cols):
             hist_files.append(str(output_file))
     plot_files["histograms"] = hist_files
 
@@ -764,7 +918,7 @@ def generate_all_visualizations(
     box_files = []
     for col in numeric_cols[: config_viz.max_boxplots]:
         output_file = output_dir / f"boxplot_{col.replace('/', '_')}.png"
-        if plot_boxplot(df[col], output_file):
+        if plot_boxplot(df[col], output_file, log_scale=col in log_cols):
             box_files.append(str(output_file))
     plot_files["boxplots"] = box_files
 
@@ -829,7 +983,7 @@ def generate_all_visualizations(
         corr_matrix = df[numeric_cols].astype(float).corr()
     for col1, col2, r in top_correlated_pairs(corr_matrix, config_viz.max_scatter_pairs):
         output_file = output_dir / f"scatter_{col1.replace('/', '_')}_vs_{col2.replace('/', '_')}.png"
-        if plot_scatter(df[col1], df[col2], output_file, r=r):
+        if plot_scatter(df[col1], df[col2], output_file, r=r, log_x=col1 in log_cols, log_y=col2 in log_cols):
             scatter_files.append(str(output_file))
 
     plot_files["scatter"] = scatter_files
@@ -837,6 +991,11 @@ def generate_all_visualizations(
     # Pair plot of the numeric variables, coloured by a group when one separates them (see choose_pair_plot)
     pair_file = output_dir / "pair_plot.png"
     plot_files["pair_plot"] = [str(pair_file)] if plot_pair_plot(df, pair_plot, pair_file) else []
+    pair_log_file = output_dir / "pair_plot_log.png"
+    needs_log = pair_plot is not None and any(col in log_cols for col in pair_plot.columns)
+    plot_files["pair_plot_log"] = (
+        [str(pair_log_file)] if needs_log and plot_pair_plot(df, pair_plot, pair_log_file, log_columns=log_cols) else []
+    )
 
     # Time series plots
     logger.info(f"Generating {len(datetime_cols)} time series plots...")
