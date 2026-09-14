@@ -482,3 +482,27 @@ Verified with real output:
 - The four branches were checked pairwise and merge cleanly in any order. The tree with all four merged, before any was on `main`, passed **231 tests**; ruff clean. `main` after the four merges: **231 passed**, ruff clean.
 - The penguin batch regenerated on `main` (`reports/penguins_batch_20260913_193213`) confirms all four findings resolved: on `penguins_lter` the 10 scatter plots are the top 10 pairs by |r|, `Date Egg` is a date with a time series, `Sample Number` is an identifier with no plot and no VIF entry, and `Sex` has 2 categories with 3.20% missing and an alert naming the `.`; `penguins_size` shows the same for its 6 pairs and `sex`. Shapes match the CSVs and no step failed.
 - The Vistara batch (`reports/Vistara_batch_20260913_193243`) keeps every type, alert and outlier count of the previous one: none of its files has more than 5 numeric columns, so every pair was already drawn, and it holds no two-digit years, counters or placeholders. Its date columns now get the per-period time series. The mortgage batch (`reports/mx_batch_20260913_193455`), the one most affected by stage 19, now draws the strongest pair on each file, including `monto_credito` vs `saldo_principal` (|r| = 1.00) on `credito_asegurado`; all four files match their CSV row counts with no failed step.
+
+## Stage 23: A pair plot of the numeric variables, coloured by group
+**Goal**: The user asked for a pair plot section below «Scatter Plots (Pares con Mayor Correlación)», to explore several numeric relationships at once and see whether groups differ.
+
+**Success Criteria**:
+- A «Pair Plot: Relaciones entre Variables Numéricas» block follows the scatter plots whenever a dataset has at least 3 continuous numeric columns; with more than 6, the columns in the strongest correlations are kept, in dataset order.
+- It is coloured by a classification target when there is one; otherwise by the categorical column of 2 to 6 groups with the highest mean correlation ratio against the columns, only if that reaches 0.25. Every group needs at least 10 rows in what is drawn.
+- On the diagonal each group's KDE is normalised on its own; above 2 000 complete rows a fixed random sample is drawn.
+- The report and `summary.json → pair_plot` state the columns, the group and why, or why the plot is uncoloured.
+- `ruff check .` and `ruff format --check .` are clean, with no warnings.
+
+**Tests** (all failed before the code existed):
+- `tests/test_modules.py::TestPairPlot`: 8 tests (the best-separating group colours the plot and one that separates nothing does not; a classification target wins even when weak; groups too many or too small are skipped; fewer than 3 continuous columns give no plot; the most related columns are kept above 6; large tables are sampled; the file is written).
+- `tests/test_integration.py::TestOutputCompleteness::test_pair_plot_follows_the_scatter_plots_and_names_its_group` and `test_no_pair_plot_with_fewer_than_three_continuous_columns`.
+
+**Status**: COMPLETE. PR #29 was merged on 2026-09-14 as `a7415a5`, and its branch was deleted.
+
+Verified with real output:
+- **241 tests passed** on the branch, 0 failed, and no warning under `-W error::UserWarning` (231 + 10 new). Ruff clean. `main` after the merge: **241 passed**, ruff clean.
+- Measured before the code, over the 19 datasets in `data/raw`: drawing cost follows the columns, not the rows (3 columns: 2.4 s for 1 000 rows, 3.4 s for 5 000; 6 columns on `penguins_lter`: 7.7 s), which set the 6-column cap and the 2 000-row sample. 13 of the 23 files have at least 3 continuous columns; no Vistara file does.
+- The mean η of the best grouping per file set the 0.25 threshold (Cohen's medium effect): both penguin files are coloured by species (0.84, 0.81) while `healthcare` (0.14), `ecommerce` (0.11), `sales` (0.07) and `credito_asegurado` (0.04) stay uncoloured.
+- Reviewing the rendered stroke plot showed the shared diagonal scale flattening the 5% of stroke cases; normalising each group on its own shows them concentrated at older ages and high glucose.
+- Reports regenerated on `main`, all without a failed step and with the block right after the scatter plots: `reports/penguins_batch_20260913_202350` (`penguins_lter` 6 columns and `penguins_size` 4, coloured by species), `reports/mx_batch_20260913_202434` (`cobranza` 3 columns, `siniestros` 5, `credito_asegurado` 6 sampled to 2 000 of 76 526 rows, all uncoloured; `clientes` has a single continuous column and no pair plot) and `reports/healthcare-dataset-stroke-data_20260913_202558` (with `--target stroke`, coloured by the target, 2 000 of 4 909 complete rows).
+- Known limit: heavily skewed money columns (`credito_asegurado`) crowd almost every point near zero, as in the scatter plots; a log scale is not part of this stage.
