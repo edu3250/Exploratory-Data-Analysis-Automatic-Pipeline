@@ -212,6 +212,20 @@ def _has_identifier_name(name: object) -> bool:
     return bool(_IDENTIFIER_NAME_PATTERN.search(text) or _CAMEL_CASE_ID_PATTERN.search(text))
 
 
+# A counter numbers the rows instead of measuring them: from one row to the next it goes up by exactly
+# one. Sample Number in penguins_lter (1 to 152) does so on 99.4% of its rows. Across every integer
+# column with more than 20 values in the 19 datasets of data/raw, no measure comes close: the highest
+# is numero_mensualidades_no_pagadas at 18.3%. Covering every value from 1 up is no signal on its own:
+# units_sold and days_to_close in sales.csv do, in no particular order.
+SEQUENCE_MIN_STEP_SHARE = 0.9
+
+
+def _looks_like_sequence(valid: pd.Series) -> bool:
+    """Does this integer column go up by exactly one from one row to the next, almost everywhere?"""
+    steps = valid.diff().dropna()
+    return len(steps) > 0 and float((steps == 1).mean()) >= SEQUENCE_MIN_STEP_SHARE
+
+
 # Above numeric_discrete_threshold, a string column is free text only if most of its values are
 # distinct; values that repeat are categories however long or numerous the labels are.
 FREE_TEXT_MIN_UNIQUE_RATIO = 0.5
@@ -259,7 +273,8 @@ def infer_semantic_type(
         - time: a time of day without a date ("11:43:47", "09:30")
         - text: free text, i.e. string values that rarely repeat
         - identifier: codes that name an entity (IDs), either unique per row or repeated as a
-          foreign key; also whole numbers whose column name marks them as keys
+          foreign key; also whole numbers whose column name marks them as keys, or that go up by
+          one from row to row (a sample or row counter)
         - constant: all values the same
     """
     # Remove nulls
@@ -297,9 +312,10 @@ def infer_semantic_type(
             return "numeric_discrete"
         # A key stored as a number is not a measurement: analysing it yields a histogram of
         # customer numbers, a VIF entry and scatter plots that mean nothing. Only whole numbers
-        # whose name marks them as keys qualify. Near-uniqueness alone would not do: on the
-        # Mexican data, monto_siniestro holds 451 distinct amounts over 452 rows.
-        if pd.api.types.is_integer_dtype(series) and _has_identifier_name(series.name):
+        # whose name marks them as keys, or that count the rows one by one, qualify. Near-uniqueness
+        # alone would not do: on the Mexican data, monto_siniestro holds 451 distinct amounts over
+        # 452 rows.
+        if pd.api.types.is_integer_dtype(series) and (_has_identifier_name(series.name) or _looks_like_sequence(valid)):
             return "identifier"
         return "numeric_continuous"
 

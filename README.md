@@ -319,6 +319,10 @@ Por ejemplo, con `--output-dir reports` los logs quedan en `logs/`, junto a `rep
   primaria) como los que se repiten (clave foránea) en cuanto superan `cardinality_threshold`
   valores distintos. Por debajo de ese umbral un código sigue siendo una categoría útil para
   agrupar (ej: 40 `product_id`). Los identificadores nunca generan alertas de cardinalidad.
+  Un entero que **sube de uno en uno de una fila a la siguiente** en al menos el 90 % de las filas
+  es un contador de filas (como `Sample Number`) y también es un identificador, se llame como se
+  llame; un conteo real como `units_sold` puede cubrir todos los valores del 1 al 99, pero no en
+  ese orden.
 - **constant**: Un solo valor único
 
 Estos tipos pueden sobreescribirse por columna mediante `column_types` en la configuración (ver
