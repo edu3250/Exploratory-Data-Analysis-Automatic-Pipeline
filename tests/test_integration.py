@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from eda_pipeline.config import Config, OutlierConfig, TargetConfig
+from eda_pipeline.config import Config, OutlierConfig, TargetConfig, VisualizationConfig
 from eda_pipeline.pipeline import EDAPipeline
 
 
@@ -471,6 +471,29 @@ class TestOutputCompleteness:
         html = Path(result["html_report"]).read_text(encoding="utf-8")
         outliers_section = html[html.index('<section id="outliers">') :]
         assert "discount_pct" in outliers_section[: outliers_section.index("</section>")]
+
+    def test_scatter_plots_show_the_most_correlated_pairs(self, tmp_output_dir):
+        """On penguins_lter the strongest pair (|r| = 0.87) was left out: pairs came in column order."""
+        n = 200
+        df = pd.DataFrame(
+            {
+                "a": [float((i * 7) % 13) for i in range(n)],
+                "b": [float((i * 11) % 17) for i in range(n)],
+                "c": [float(i) for i in range(n)],
+                "d": [2.0 * i + (i % 3) for i in range(n)],
+            }
+        )
+        csv_file = tmp_output_dir / "medidas.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(
+            input_file=str(csv_file),
+            output_dir=str(tmp_output_dir),
+            visualizations=VisualizationConfig(max_scatter_pairs=1),
+        )
+        results = pipeline.run()
+
+        plots = {p.name for p in (Path(results["medidas"]["output_dir"]) / "plots").glob("scatter_*.png")}
+        assert plots == {"scatter_c_vs_d.png"}  # the last pair in column order, and by far the strongest
 
     def test_isolation_forest_cut_is_explained_in_every_output(self, tmp_output_dir):
         """The cut used to be a hidden 10%; the summary, the CSV table and the report now say how it was drawn."""

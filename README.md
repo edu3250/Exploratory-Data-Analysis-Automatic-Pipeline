@@ -391,6 +391,8 @@ explica en la columna `nota` y el reporte lista las columnas sin IQR.
 - **Categorical ↔ Categorical**: Cramér's V (sesgada-corregida)
 - **Categorical ↔ Numeric**: Correlation ratio (eta)
 - **Multicolinealidad**: VIF (Variance Inflation Factor)
+- **Gráficos de dispersión**: los `max_scatter_pairs` pares numéricos con mayor correlación en valor
+  absoluto (|r|), del más fuerte al más débil, con su r en el título
 
 El reporte incluye dos mapas de calor:
 
