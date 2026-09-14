@@ -130,6 +130,92 @@ def plot_categorical(series: pd.Series, output_path: Path, top_n: int = 20) -> b
     return True
 
 
+# A pie shows part-to-whole at a glance only while its slices can be told apart: about six at most.
+# Measured over the 19 datasets in data/raw, 66 of the 101 categorical columns have five categories or
+# fewer, none has six, and the next ones hold 7 to 10 slices of similar size (año in the mortgage
+# data: ten slices of about 10% each), which only the bar chart can still show.
+PIE_MAX_CATEGORIES = 6
+
+# Slices below this share get no label inside the pie, where it would sit on its neighbours'
+# (discount_pct 0.15 is 0.7% of Order_Details). The legend lists every category with its share.
+PIE_MIN_LABELLED_SHARE = 5.0
+
+
+def _category_counts(series: pd.Series) -> pd.Series:
+    """Rows per category, most frequent first, missing values left out."""
+    return series.dropna().value_counts()
+
+
+def pie_chart_shares(series: pd.Series) -> pd.Series | None:
+    """
+    Percentage of rows per category, most frequent first, over the rows that have a value.
+
+    None when a pie would not work: a single category, or more than PIE_MAX_CATEGORIES.
+    """
+    counts = _category_counts(series)
+    if len(counts) < 2 or len(counts) > PIE_MAX_CATEGORIES:
+        return None
+    return counts / counts.sum() * 100
+
+
+def format_share(pct: float) -> str:
+    """A share as text; a share that would round to 0.0 reads "<0.1 %", so it never looks empty."""
+    if 0 < pct < 0.1:
+        return "<0.1 %"
+    return f"{pct:.1f} %"
+
+
+def pie_slice_label(pct: float) -> str:
+    """The label drawn inside a slice: its share, or nothing for a slice too thin to hold it."""
+    return format_share(pct) if pct >= PIE_MIN_LABELLED_SHARE else ""
+
+
+def _readable_text_color(facecolor) -> str:
+    """White or near-black, whichever contrasts more with the slice it sits on."""
+    r, g, b = (c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in facecolor[:3])
+    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return "white" if (1.05 / (luminance + 0.05)) >= ((luminance + 0.05) / 0.05) else "#222222"
+
+
+@safe_plot
+def plot_pie_chart(series: pd.Series, output_path: Path) -> bool:
+    """
+    Pie of a categorical column in percentages: each large slice carries its share, and the legend
+    names every category with its share and row count, so no slice is identified by colour alone.
+    """
+    shares = pie_chart_shares(series)
+    if shares is None:
+        return False
+    counts = _category_counts(series)
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    wedges, _, labels = ax.pie(
+        shares.values,
+        startangle=90,
+        counterclock=False,  # clockwise from the top, largest slice first
+        autopct=pie_slice_label,
+        pctdistance=0.7,
+        wedgeprops={"linewidth": 2, "edgecolor": "white"},
+        textprops={"fontsize": 11},
+    )
+    for wedge, label in zip(wedges, labels):
+        label.set_color(_readable_text_color(wedge.get_facecolor()))
+
+    ax.legend(
+        wedges,
+        [f"{category}: {format_share(pct)} ({counts[category]})" for category, pct in shares.items()],
+        title=str(series.name),
+        loc="center left",
+        bbox_to_anchor=(1.0, 0.5),
+        frameon=False,
+    )
+    ax.set_title(f"Proporción: {series.name} (n = {int(counts.sum())})")
+    ax.axis("equal")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
 @safe_plot
 def plot_correlation_heatmap(corr_matrix: pd.DataFrame, output_path: Path, max_size: int = 30) -> bool:
     """Plot correlation heatmap."""
@@ -472,6 +558,14 @@ def generate_all_visualizations(
         if plot_categorical(df[col], output_file):
             cat_files.append(str(output_file))
     plot_files["categorical"] = cat_files
+
+    # The same columns as pies, in percentages, while they have few enough categories
+    pie_files = []
+    for col in categorical_cols[: config_viz.max_histograms]:
+        output_file = output_dir / f"pie_{col.replace('/', '_')}.png"
+        if plot_pie_chart(df[col], output_file):
+            pie_files.append(str(output_file))
+    plot_files["pie"] = pie_files
 
     # Target against each categorical variable (only makes sense for a classification target)
     target_bar_files = []

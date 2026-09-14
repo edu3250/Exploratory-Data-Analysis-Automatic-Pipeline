@@ -12,6 +12,7 @@ import pandas as pd
 from jinja2 import Template
 
 from .type_inference import dtype_label, semantic_type_label
+from .visualizations import PIE_MAX_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -661,6 +662,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
         {% endif %}
 
+        {% if plots.pie %}
+        <h3>Proporciones Categóricas ({{ plots.pie | length }})</h3>
+        <p style="color: #555; margin-top: -8px;">
+            Porcentaje de cada categoría sobre las filas que tienen valor. Solo para columnas con hasta
+            {{ pie_max_categories }} categorías: con más, las porciones ya no se distinguen y queda el gráfico de barras.
+        </p>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+            {% for img in plots.pie %}
+            <div class="plot-container">
+                <img src="data:image/png;base64,{{ img }}" alt="Pie chart">
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
         {% if plots.target_categorical %}
         <h3>Target vs Variables Categóricas ({{ plots.target_categorical | length }})</h3>
         <p style="color: #555; margin-top: -8px;">
@@ -786,6 +802,7 @@ def generate_html_report(
         "outliers": outliers,
         "target_analysis": target_analysis,
         "plots": encoded_plots,
+        "pie_max_categories": PIE_MAX_CATEGORIES,
         "alerts": alerts,
         "ignored_columns": ignored_columns or [],
         "failed_steps": failed_steps or [],

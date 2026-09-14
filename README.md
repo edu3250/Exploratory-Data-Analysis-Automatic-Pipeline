@@ -11,7 +11,7 @@ Un pipeline completo y automatizado para realizar análisis exploratorio de dato
 - **Detección de outliers**: IQR, MAD (z-score robusto), Isolation Forest multivariado
 - **Análisis de relaciones**: Correlación Pearson, Cramér's V (categóricas), correlation ratio (mixtas), detección de multicolinealidad (VIF)
 - **Análisis de target**: Auto-detección clasificación/regresión, balance de clases, relaciones feature-target, detección de fugas
-- **Visualizaciones**: Histogramas, boxplots, gráficos categóricos, barras agrupadas del target frente a cada categórica, matriz de correlaciones, mapa de nulos, scatter plots, series temporales — todos los gráficos generados se incluyen en el reporte
+- **Visualizaciones**: Histogramas, boxplots, gráficos categóricos (barras, y pie charts en porcentaje para las columnas con pocas categorías), barras agrupadas del target frente a cada categórica, matriz de correlaciones, mapa de nulos, scatter plots, series temporales — todos los gráficos generados se incluyen en el reporte
 - **Reportes**: HTML auto-contenido (offline), JSON estructurado (`summary.json`), tablas CSV de resultados (`tables/`)
 - **Batch processing**: Procesa todos los archivos soportados de una carpeta, uno a la vez; un archivo que falla no aborta el resto
 - **Configuración flexible**: YAML + overrides de CLI, con validación y mensajes de error claros
@@ -356,6 +356,16 @@ El sistema genera alertas (alta, media, baja) para:
 
 Las alertas de target (desbalance, fugas) aparecen tanto en la sección «Alertas y
 Recomendaciones» del HTML como en `summary.json → alerts`, junto con las de calidad de datos.
+
+### Proporciones categóricas (pie charts)
+
+Debajo de «Distribuciones Categóricas», el reporte muestra un pie chart por cada columna categórica
+con **hasta 6 categorías**, con el porcentaje de cada una sobre las filas que tienen valor. Las
+porciones de al menos el 5 % llevan su porcentaje escrito dentro; la leyenda lista todas las
+categorías con su porcentaje y su número de filas, incluidas las más pequeñas (una porción menor al
+0.1 % se muestra como `<0.1 %`). Las columnas con más de 6 categorías solo tienen el gráfico de
+barras: con 10 porciones de tamaño parecido (por ejemplo, `año` en los datos de México) un pie ya
+no se puede leer.
 
 ### Outliers
 
