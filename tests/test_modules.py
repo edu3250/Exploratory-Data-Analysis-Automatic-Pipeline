@@ -474,7 +474,9 @@ class TestTypeInference:
     def test_amount_with_almost_unique_values_stays_numeric(self):
         # mx: monto_siniestro holds 451 distinct integers over 452 rows. Uniqueness alone would
         # call it a key, but it is money, so the name is what decides.
-        series = pd.Series(range(10_000, 10_452), name="monto_siniestro")
+        # Shuffled: amounts that climb by exactly one per row would be a row counter, not amounts.
+        amounts = np.random.default_rng(0).permutation(np.arange(10_000, 10_452))
+        series = pd.Series(amounts, name="monto_siniestro")
         assert infer_semantic_type(series) == "numeric_continuous"
 
     def test_small_numeric_code_stays_discrete(self):
@@ -486,9 +488,26 @@ class TestTypeInference:
         series = pd.Series([float(i) + 0.5 for i in range(100)], name="id")
         assert infer_semantic_type(series) == "numeric_continuous"
 
+    def test_sequence_number_is_an_identifier(self):
+        # Sample Number in penguins_lter: 1 to 152, restarting per study, 99.4% of steps are +1.
+        values = list(range(1, 153)) + list(range(1, 125)) + list(range(1, 69))
+        series = pd.Series(values, name="Sample Number", dtype="Int64")
+        assert infer_semantic_type(series) == "identifier"
+
+    def test_shuffled_count_covering_every_value_stays_numeric(self):
+        # units_sold in sales.csv holds every value from 1 to 99, but in no particular order.
+        rng = np.random.default_rng(0)
+        series = pd.Series(rng.permutation(np.tile(np.arange(1, 100), 10)), name="units_sold", dtype="Int64")
+        assert infer_semantic_type(series) == "numeric_continuous"
+
+    def test_sorted_measure_with_repeats_stays_numeric(self):
+        series = pd.Series(sorted(np.random.default_rng(1).integers(18, 90, 500)), name="edad", dtype="Int64")
+        assert infer_semantic_type(series) == "numeric_continuous"
+
     def test_name_merely_ending_in_id_is_not_an_identifier(self):
         # "humid" ends in those two letters without being a key.
-        assert infer_semantic_type(pd.Series(range(1, 501), name="humid")) == "numeric_continuous"
+        readings = np.random.default_rng(0).integers(20, 100, 500)  # not 1, 2, 3...: that is a counter
+        assert infer_semantic_type(pd.Series(readings, name="humid")) == "numeric_continuous"
 
     # --- Bug #6: date inference must be precise and warning-free -----------------------------
 

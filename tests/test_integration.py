@@ -674,7 +674,7 @@ class TestOutputCompleteness:
         df = pd.DataFrame(
             {
                 "id": range(1, n + 1),
-                "edad": [20 + i % 50 for i in range(n)],
+                "edad": [20 + (i * 7) % 50 for i in range(n)],  # not 20, 21, 22...: that is a row counter
                 "monto": [100.0 + i for i in range(n)],
                 "ciudad": [["a", "b", "c"][i % 3] for i in range(n)],
             }
@@ -696,6 +696,28 @@ class TestOutputCompleteness:
         assert "boxplot_id.png" not in plots
         assert {p for p in plots if p.startswith("scatter_")} == {"scatter_edad_vs_monto.png"}
         assert "histogram_edad.png" in plots  # the real variables are untouched
+
+    def test_sequence_number_columns_are_not_analysed_as_variables(self, tmp_output_dir):
+        """Sample Number (1-152) got a histogram, a boxplot, a VIF entry and 6 of the 10 scatter plots."""
+        n = 300
+        df = pd.DataFrame(
+            {
+                "Sample Number": [1 + i % 150 for i in range(n)],
+                "masa": [3000.0 + (i * 37) % 900 for i in range(n)],
+                "aleta": [180.0 + (i * 11) % 50 for i in range(n)],
+            }
+        )
+        csv_file = tmp_output_dir / "muestras.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["muestras"]
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        assert summary["column_types"]["Sample Number"] == "identifier"
+        assert "Sample Number" not in summary["relationships"]["multicollinearity_vif"]
+        plots = {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
+        assert not any("Sample Number" in name for name in plots)
 
     def test_report_heatmap_includes_categorical_variables(self, tmp_output_dir):
         """The heatmap covered only numeric columns, leaving every categorical one invisible."""
