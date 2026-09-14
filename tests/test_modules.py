@@ -350,6 +350,45 @@ class TestDataLoader:
         assert "bad" not in results
 
 
+class TestMissingValuePlaceholders:
+    """A lone "." in penguins sex was counted as a third sex instead of a missing value."""
+
+    def test_punctuation_only_cells_become_missing(self):
+        from eda_pipeline.data_loader import replace_missing_placeholders
+
+        df = pd.DataFrame({"sex": pd.Series(["MALE", "FEMALE", ".", "MALE", " - ", None], dtype="string")})
+        cleaned, found = replace_missing_placeholders(df)
+        assert cleaned["sex"].isna().sum() == 3
+        assert set(cleaned["sex"].dropna()) == {"MALE", "FEMALE"}
+        assert found == {"sex": {".": 1, "-": 1}}
+
+    def test_text_that_merely_contains_punctuation_is_kept(self):
+        from eda_pipeline.data_loader import replace_missing_placeholders
+
+        values = ["Dr.", "N/A-12", "-5", "a.b", "?"]
+        df = pd.DataFrame({"nota": pd.Series(values, dtype="string"), "monto": [1.0, 2.0, 3.0, 4.0, 5.0]})
+        cleaned, found = replace_missing_placeholders(df)
+        assert list(cleaned["nota"].dropna()) == ["Dr.", "N/A-12", "-5", "a.b"]
+        assert found == {"nota": {"?": 1}}  # numbers and untouched columns are not reported
+
+    def test_a_column_of_numbers_with_placeholders_becomes_numeric(self):
+        from eda_pipeline.data_loader import replace_missing_placeholders
+
+        # "?" in a column of weights makes pandas read every weight as text.
+        df = pd.DataFrame({"peso": pd.Series(["3750", "?", "3800.5", "4100"], dtype="string")})
+        cleaned, _ = replace_missing_placeholders(df)
+        assert pd.api.types.is_numeric_dtype(cleaned["peso"])
+        assert cleaned["peso"].sum() == pytest.approx(11650.5)
+
+    def test_nothing_to_replace_leaves_the_frame_as_it_was(self):
+        from eda_pipeline.data_loader import replace_missing_placeholders
+
+        df = pd.DataFrame({"sex": pd.Series(["MALE", "FEMALE"], dtype="string"), "masa": [1, 2]})
+        cleaned, found = replace_missing_placeholders(df)
+        assert found == {}
+        pd.testing.assert_frame_equal(cleaned, df)
+
+
 class TestTypeInference:
     """Test semantic type inference."""
 

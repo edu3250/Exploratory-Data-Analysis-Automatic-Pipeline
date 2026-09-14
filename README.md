@@ -343,6 +343,10 @@ texto JSON en vez de hacer fallar los pasos posteriores del análisis.
 El sistema genera alertas (alta, media, baja) para:
 
 - >95% valores faltantes por columna (`missing_threshold`)
+- Celdas que solo contienen signos (`.`, `-`, `?`, `_`, `*`, `/`): se toman como valores faltantes antes
+  de analizar, y cada columna afectada recibe una alerta con los marcadores y cuántas veces aparecen
+  (también en `summary.json → data_quality.missing_placeholders`). Si una columna de texto queda
+  solo con números, pasa a ser numérica.
 - Duplicados exactos: la severidad depende de `duplicate_threshold` (por encima del umbral → alta;
   por encima de la mitad del umbral → media; el resto → baja)
 - Columnas constantes/quasi-constantes (`constant_threshold`)

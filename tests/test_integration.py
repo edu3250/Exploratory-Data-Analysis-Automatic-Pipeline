@@ -561,6 +561,28 @@ class TestOutputCompleteness:
         assert "Proporciones Categóricas (1)" in html
         assert html.index("Distribuciones Categóricas") < html.index("Proporciones Categóricas")
 
+    def test_missing_value_placeholders_are_reported_and_not_analysed(self, tmp_output_dir):
+        """The "." in sex showed up as a category in the bars and as a 0.3% slice of the pie."""
+        n = 100
+        sexo = [["MALE", "FEMALE"][i % 2] for i in range(n)]
+        sexo[7] = "."
+        df = pd.DataFrame({"sexo": sexo, "masa": [3000.0 + (i * 37) % 900 for i in range(n)]})
+        csv_file = tmp_output_dir / "pinguinos.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["pinguinos"]
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        assert summary["data_quality"]["missing_placeholders"] == {"sexo": {".": 1}}
+        assert any(a["column"] == "sexo" and "'.'" in a["message"] for a in summary["alerts"])
+
+        tables = Path(result["output_dir"]) / "tables"
+        categorical = pd.read_csv(tables / "categorical_stats.csv").set_index("columna")
+        assert categorical.loc["sexo", "nunique"] == 2
+        missing = pd.read_csv(tables / "missing_per_column.csv").set_index("columna")
+        assert missing.loc["sexo", "pct_faltante"] == pytest.approx(1.0)
+
     def test_target_analysis_adds_grouped_bars_per_categorical(self, tmp_output_dir):
         """With a target, the report compares it against every categorical variable."""
         csv_file = tmp_output_dir / "pacientes.csv"
