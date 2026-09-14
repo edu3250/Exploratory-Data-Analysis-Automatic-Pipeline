@@ -472,6 +472,53 @@ class TestOutputCompleteness:
         outliers_section = html[html.index('<section id="outliers">') :]
         assert "discount_pct" in outliers_section[: outliers_section.index("</section>")]
 
+    def test_pair_plot_follows_the_scatter_plots_and_names_its_group(self, tmp_output_dir):
+        """A pair plot of the numeric variables, coloured by the group that separates them, below the scatter plots."""
+        n = 240
+        especie = [["Adelie", "Gentoo", "Chinstrap"][i % 3] for i in range(n)]
+        offset = {"Adelie": 0.0, "Gentoo": 10.0, "Chinstrap": 5.0}
+        df = pd.DataFrame(
+            {
+                "pico": [40 + offset[e] + (i * 7) % 29 / 10 for i, e in enumerate(especie)],
+                "aleta": [190 + 2 * offset[e] + (i * 11) % 31 / 5 for i, e in enumerate(especie)],
+                "masa": [3500 + 100 * offset[e] + (i * 13) % 17 * 5 for i, e in enumerate(especie)],
+                "especie": especie,
+            }
+        )
+        csv_file = tmp_output_dir / "pinguinos.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["pinguinos"]
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        assert summary["failed_steps"] == []
+        assert summary["pair_plot"]["columns"] == ["pico", "aleta", "masa"]
+        assert summary["pair_plot"]["hue"] == "especie"
+        assert "pair_plot.png" in {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
+
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        scatter_at = html.index("Scatter Plots (Pares con Mayor Correlación)")
+        pair_at = html.index("Pair Plot")
+        assert scatter_at < pair_at
+        assert "especie" in html[pair_at : pair_at + 2000]
+
+    def test_no_pair_plot_with_fewer_than_three_continuous_columns(self, tmp_output_dir):
+        n = 120
+        df = pd.DataFrame(
+            {"precio": [100.0 + (i * 7) % 50 for i in range(n)], "total": [300.0 + (i * 13) % 90 for i in range(n)]}
+        )
+        csv_file = tmp_output_dir / "ventas.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["ventas"]
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        assert summary["pair_plot"] is None
+        assert "pair_plot.png" not in {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
+        assert "Pair Plot" not in Path(result["html_report"]).read_text(encoding="utf-8")
+
     def test_scatter_plots_show_the_most_correlated_pairs(self, tmp_output_dir):
         """On penguins_lter the strongest pair (|r| = 0.87) was left out: pairs came in column order."""
         n = 200

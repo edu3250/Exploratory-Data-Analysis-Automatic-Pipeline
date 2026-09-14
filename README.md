@@ -404,6 +404,14 @@ explica en la columna `nota` y el reporte lista las columnas sin IQR.
 - **Multicolinealidad**: VIF (Variance Inflation Factor)
 - **Gráficos de dispersión**: los `max_scatter_pairs` pares numéricos con mayor correlación en valor
   absoluto (|r|), del más fuerte al más débil, con su r en el título
+- **Pair plot**: debajo de los gráficos de dispersión, un pair plot con las columnas numéricas continuas
+  (hace falta al menos 3; si hay más de 6, las 6 con correlaciones más fuertes). Cada panel cruza dos
+  variables y la diagonal muestra la distribución de cada una. Se colorea por grupo cuando hay uno que
+  sirva: el target, si es de clasificación; si no, la variable categórica de 2 a 6 grupos que más separa
+  esas columnas, siempre que llegue a un η medio de 0.25 (efecto mediano). Cada grupo necesita al menos
+  10 filas, y en la diagonal cada grupo se normaliza por separado para comparar formas aunque sea
+  pequeño. Con más de 2 000 filas completas se usa una muestra aleatoria fija. El reporte y
+  `summary.json → pair_plot` dicen qué columnas, qué grupo y por qué.
 
 El reporte incluye dos mapas de calor:
 
