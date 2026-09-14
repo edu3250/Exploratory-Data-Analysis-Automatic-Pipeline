@@ -300,9 +300,12 @@ Por ejemplo, con `--output-dir reports` los logs quedan en `logs/`, junto a `rep
   por encima de eso lo sigue siendo mientras la mayoría de las filas repitan valores.
 - **boolean**: True/False, sí/no
 - **datetime**: Fecha/hora; para columnas de texto, solo se reconocen formatos explícitos
-  (ISO 8601, `dd/mm/aaaa`, `mm/dd/aaaa`, `dd-mm-aaaa`, con o sin hora) con una proporción alta
-  de aciertos, priorizando día-primero en casos ambiguos. Los valores numéricos con separador
-  decimal no se confunden con fechas.
+  (ISO 8601, `dd/mm/aaaa`, `mm/dd/aaaa`, `dd-mm-aaaa`, con o sin hora, y también con el año en dos
+  dígitos: `dd/mm/aa`, `mm/dd/aa`) con una proporción alta de aciertos, priorizando día-primero en
+  casos ambiguos. Los valores numéricos con separador decimal no se confunden con fechas. Sus
+  estadísticas se calculan leyendo la columna con esos mismos formatos, y la serie temporal cuenta
+  las filas por día, semana, mes o año (el periodo más fino que no pase de 120 puntos), con los
+  periodos vacíos en cero.
 - **time**: Hora del día sin fecha (`11:43:47`, `09:30`). Se exige que más del 90 % de los
   valores tengan esa forma y que un reloj pueda mostrarlos: `25:30` no es una hora. El reporte
   muestra la primera y la última hora, la hora pico y un gráfico de barras por hora (00 a 23), en

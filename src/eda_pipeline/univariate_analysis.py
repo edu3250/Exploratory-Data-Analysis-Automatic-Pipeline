@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .type_inference import parse_time_of_day
+from .type_inference import coerce_to_datetime, parse_time_of_day
 
 logger = logging.getLogger(__name__)
 
@@ -214,11 +214,12 @@ def analyze_datetime(series: pd.Series) -> DatetimeStats:
     if count == 0:
         return DatetimeStats(count=0, missing=len(series), min_date="", max_date="", n_days=0, gaps=[], frequency=None)
 
-    # Convert to datetime if needed
+    # Dates stored as text are read with the formats that recognised them, not by pandas guessing
+    # one: a bare pd.to_datetime reads "05/03/07" as May 3rd and warns while doing so.
     if not pd.api.types.is_datetime64_any_dtype(valid):
-        try:
-            valid = pd.to_datetime(valid)
-        except Exception:
+        valid = coerce_to_datetime(valid).dropna()
+        count = len(valid)
+        if count == 0:
             return DatetimeStats(
                 count=0, missing=len(series), min_date="", max_date="", n_days=0, gaps=[], frequency=None
             )
