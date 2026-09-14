@@ -295,9 +295,32 @@ def plot_missing_matrix(df: pd.DataFrame, output_path: Path) -> bool:
     return True
 
 
+def top_correlated_pairs(corr_matrix: pd.DataFrame, limit: int) -> list[tuple[str, str, float]]:
+    """
+    The `limit` column pairs with the strongest Pearson correlation, strongest first by |r|, sign kept.
+
+    Pairs whose correlation is undefined (a constant column) are left out. The scatter plots used to
+    take the first pairs in column order instead: on penguins_lter the strongest pair (|r| = 0.87) was
+    not drawn, and on credito_asegurado neither was a pair at |r| = 1.00.
+    """
+    if corr_matrix.empty:
+        return []
+    columns = list(corr_matrix.columns)
+    pairs = [
+        (first, second, float(corr_matrix.loc[first, second]))
+        for i, first in enumerate(columns)
+        for second in columns[i + 1 :]
+        if pd.notna(corr_matrix.loc[first, second])
+    ]
+    pairs.sort(key=lambda pair: abs(pair[2]), reverse=True)
+    return pairs[:limit]
+
+
 @safe_plot
-def plot_scatter(x: pd.Series, y: pd.Series, output_path: Path, sample_size: int = 1000) -> bool:
-    """Plot scatter plot."""
+def plot_scatter(
+    x: pd.Series, y: pd.Series, output_path: Path, sample_size: int = 1000, r: float | None = None
+) -> bool:
+    """Plot scatter plot, with the pair's Pearson correlation in the title when it is known."""
     valid = pd.DataFrame({"x": x, "y": y}).dropna()
     if len(valid) < 2:
         return False
@@ -308,7 +331,7 @@ def plot_scatter(x: pd.Series, y: pd.Series, output_path: Path, sample_size: int
 
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.scatter(valid["x"], valid["y"], alpha=0.6, s=20)
-    ax.set_title(f"Scatter: {x.name} vs {y.name}")
+    ax.set_title(f"Scatter: {x.name} vs {y.name}" + (f" (r = {r:.2f})" if r is not None else ""))
     ax.set_xlabel(x.name)
     ax.set_ylabel(y.name)
     plt.tight_layout()
@@ -603,20 +626,16 @@ def generate_all_visualizations(
     else:
         plot_files["missing"] = []
 
-    # Scatter plots for top correlations
+    # Scatter plots for the most correlated pairs
     logger.info("Generating scatter plots...")
     scatter_files = []
-    top_pairs = 0
-    for i, col1 in enumerate(numeric_cols):
-        if top_pairs >= config_viz.max_scatter_pairs:
-            break
-        for col2 in numeric_cols[i + 1 :]:
-            if top_pairs >= config_viz.max_scatter_pairs:
-                break
-            output_file = output_dir / f"scatter_{col1.replace('/', '_')}_vs_{col2.replace('/', '_')}.png"
-            if plot_scatter(df[col1], df[col2], output_file):
-                scatter_files.append(str(output_file))
-                top_pairs += 1
+    if corr_matrix.empty and len(numeric_cols) >= 2:
+        # The relationships step failed or was skipped; rank the pairs here rather than draw none.
+        corr_matrix = df[numeric_cols].astype(float).corr()
+    for col1, col2, r in top_correlated_pairs(corr_matrix, config_viz.max_scatter_pairs):
+        output_file = output_dir / f"scatter_{col1.replace('/', '_')}_vs_{col2.replace('/', '_')}.png"
+        if plot_scatter(df[col1], df[col2], output_file, r=r):
+            scatter_files.append(str(output_file))
 
     plot_files["scatter"] = scatter_files
 

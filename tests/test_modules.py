@@ -59,6 +59,7 @@ from eda_pipeline.visualizations import (
     plot_target_vs_categorical,
     plot_time_of_day,
     target_vs_categorical_counts,
+    top_correlated_pairs,
 )
 
 
@@ -887,6 +888,42 @@ class TestRelationships:
         )
         eta = correlation_ratio(cat, num)
         assert eta > 0.5  # Should be highly associated
+
+
+class TestScatterPairs:
+    """The scatter plots promise the most correlated pairs; they used to take the first pairs in column order."""
+
+    @staticmethod
+    def _frame() -> pd.DataFrame:
+        rng = np.random.default_rng(0)
+        base = rng.normal(size=300)
+        return pd.DataFrame(
+            {
+                "ruido_1": rng.normal(size=300),
+                "ruido_2": rng.normal(size=300),
+                "debil": base + rng.normal(scale=3, size=300),
+                "fuerte": base,
+                "inverso": -base + rng.normal(scale=0.1, size=300),
+            }
+        )
+
+    def test_pairs_come_strongest_first_whatever_their_sign(self):
+        corr = self._frame().corr()
+        pairs = top_correlated_pairs(corr, limit=3)
+        assert {pairs[0][0], pairs[0][1]} == {"fuerte", "inverso"}
+        assert pairs[0][2] < -0.9  # the sign is kept, the ranking uses |r|
+        strengths = [abs(r) for _, _, r in pairs]
+        assert strengths == sorted(strengths, reverse=True)
+
+    def test_limit_is_respected_and_undefined_correlations_are_left_out(self):
+        df = self._frame()
+        df["constante"] = 1.0
+        pairs = top_correlated_pairs(df.corr(), limit=4)
+        assert len(pairs) == 4
+        assert all("constante" not in (a, b) for a, b, _ in pairs)
+
+    def test_no_matrix_no_pairs(self):
+        assert top_correlated_pairs(pd.DataFrame(), limit=10) == []
 
 
 class TestHtmlReport:
