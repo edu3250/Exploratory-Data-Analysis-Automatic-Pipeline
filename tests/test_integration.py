@@ -536,6 +536,31 @@ class TestOutputCompleteness:
             }
         )
 
+    def test_categorical_columns_with_few_categories_get_a_pie(self, tmp_output_dir):
+        """Bars show counts; a pie shows each category's share, but only while there are few of them."""
+        n = 120
+        df = pd.DataFrame(
+            {
+                "canal": [["tienda", "web", "web", "app"][i % 4] for i in range(n)],
+                "municipio": [f"Municipio {i % 12}" for i in range(n)],
+                "monto": [100.0 + i for i in range(n)],
+            }
+        )
+        csv_file = tmp_output_dir / "ventas.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["ventas"]
+        plots = {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
+        assert "pie_canal.png" in plots
+        assert "pie_municipio.png" not in plots
+        assert "categorical_municipio.png" in plots  # its bars stay
+
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        assert "Proporciones Categóricas (1)" in html
+        assert html.index("Distribuciones Categóricas") < html.index("Proporciones Categóricas")
+
     def test_target_analysis_adds_grouped_bars_per_categorical(self, tmp_output_dir):
         """With a target, the report compares it against every categorical variable."""
         csv_file = tmp_output_dir / "pacientes.csv"

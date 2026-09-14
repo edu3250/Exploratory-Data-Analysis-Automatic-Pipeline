@@ -50,7 +50,12 @@ from eda_pipeline.univariate_analysis import (
     analyze_univariate,
 )
 from eda_pipeline.visualizations import (
+    PIE_MAX_CATEGORIES,
     TARGET_BAR_MAX_CLASSES,
+    format_share,
+    pie_chart_shares,
+    pie_slice_label,
+    plot_pie_chart,
     plot_target_vs_categorical,
     plot_time_of_day,
     target_vs_categorical_counts,
@@ -988,6 +993,49 @@ class TestAssociationMatrix:
         matrix = association_matrix(df, ["a", "b"], ["g"])
         assert matrix.loc["a", "b"] == pytest.approx(-1.0)
         assert matrix.loc["a", "g"] >= 0.0
+
+
+class TestCategoricalPieChart:
+    """A pie per categorical column, in percentages, only while its slices can still be told apart."""
+
+    def test_shares_add_up_to_100_in_frequency_order(self):
+        series = pd.Series(["b"] * 3 + ["a"] * 6 + ["c"] * 1 + [None] * 2, name="canal")
+        shares = pie_chart_shares(series)
+        assert list(shares.index) == ["a", "b", "c"]
+        assert list(shares.round(6)) == [60.0, 30.0, 10.0]  # missing values are not a slice
+
+    def test_the_limit_itself_still_gets_a_pie(self):
+        series = pd.Series([f"c{i % PIE_MAX_CATEGORIES}" for i in range(120)], name="canal")
+        assert pie_chart_shares(series) is not None
+
+    def test_too_many_categories_get_no_pie(self):
+        # año in the mortgage data: ten slices of about 10% each, no longer readable as a pie.
+        series = pd.Series([f"c{i % (PIE_MAX_CATEGORIES + 1)}" for i in range(120)], name="año")
+        assert pie_chart_shares(series) is None
+
+    def test_a_single_category_gets_no_pie(self):
+        assert pie_chart_shares(pd.Series(["a"] * 20, name="constante")) is None
+
+    def test_small_slices_carry_no_label_inside_the_pie(self):
+        # discount_pct 0.15 is 0.7% of the rows: its label would sit on top of its neighbours'.
+        assert pie_slice_label(0.7) == ""
+        assert pie_slice_label(16.6) == "16.6 %"
+
+    def test_a_share_that_rounds_to_zero_is_not_shown_as_zero(self):
+        assert format_share(0.02) == "<0.1 %"
+        assert format_share(76.94) == "76.9 %"
+
+    def test_writes_the_pie(self, tmp_output_dir):
+        series = pd.Series([0.0] * 77 + [0.1] * 17 + [0.3] * 3 + [0.2] * 3, name="discount_pct")
+        output = tmp_output_dir / "pie_discount_pct.png"
+        assert plot_pie_chart(series, output) is True
+        assert output.exists()
+
+    def test_no_file_for_a_column_with_too_many_categories(self, tmp_output_dir):
+        series = pd.Series([f"c{i % 12}" for i in range(120)], name="municipio")
+        output = tmp_output_dir / "pie_municipio.png"
+        assert plot_pie_chart(series, output) is False
+        assert not output.exists()
 
 
 class TestTargetCategoricalBars:
