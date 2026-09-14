@@ -730,6 +730,28 @@ class TestOutputCompleteness:
         assert "columna,tipo_dato,categoria_inferida,pct_faltante" in csv_text
         assert "quantity,int,Numérica discreta" in csv_text
 
+    def test_two_digit_year_dates_are_analysed_as_dates(self, tmp_output_dir):
+        """Date Egg (11/11/07) was a category with 50 values: no date statistics, no time series."""
+        n = 150
+        df = pd.DataFrame(
+            {
+                "fecha_huevo": [f"11/{9 + i % 20}/{7 + i % 3:02d}" for i in range(n)],
+                "masa": [3000.0 + (i * 37) % 900 for i in range(n)],
+            }
+        )
+        csv_file = tmp_output_dir / "nidos.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["nidos"]
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        assert summary["column_types"]["fecha_huevo"] == "datetime"
+        assert summary["univariate"]["datetime_columns"] == 1
+        plots = {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
+        assert "timeseries_fecha_huevo.png" in plots
+        assert "categorical_fecha_huevo.png" not in plots
+
     def test_html_report_embeds_boxplots_and_timeseries(self, tmp_output_dir, synthetic_dataset):
         """Bug #18: boxplots and time series were generated but never embedded in the report."""
         csv_file = tmp_output_dir / "data.csv"

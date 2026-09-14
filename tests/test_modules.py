@@ -401,6 +401,29 @@ class TestTypeInference:
         series = pd.Series([f"2024-01-{1 + i % 28:02d} 11:43:47" for i in range(100)], name="momento", dtype="string")
         assert infer_semantic_type(series) == "datetime"
 
+    @staticmethod
+    def _egg_dates() -> pd.Series:
+        # Like Date Egg in penguins_lter: month/day/two-digit year, several seasons.
+        days = [f"11/{d}/{y:02d}" for y in (7, 8, 9) for d in range(9, 29)]
+        return pd.Series(days * 3, name="Date Egg", dtype="string")
+
+    def test_dates_with_a_two_digit_year_are_dates(self):
+        assert infer_semantic_type(self._egg_dates()) == "datetime"
+
+    def test_two_digit_year_dates_parse_to_the_right_day(self):
+        from eda_pipeline.type_inference import coerce_to_datetime
+
+        parsed = coerce_to_datetime(self._egg_dates())
+        assert parsed.notna().all()
+        assert parsed.min() == pd.Timestamp("2007-11-09")
+        assert parsed.max() == pd.Timestamp("2009-11-28")
+
+    def test_ambiguous_two_digit_year_dates_read_day_first(self):
+        from eda_pipeline.type_inference import coerce_to_datetime
+
+        series = pd.Series(["05/03/07", "06/03/07", "07/03/07"] * 10, name="fecha", dtype="string")
+        assert coerce_to_datetime(series).iloc[0] == pd.Timestamp("2007-03-05")
+
     def test_text(self):
         series = pd.Series([f"Text {i} " * 10 for i in range(100)], name="text")
         dtype = infer_semantic_type(series)
@@ -761,6 +784,58 @@ class TestUnivariateAnalysis:
         series = pd.Series(["09:15:00", "18:30:10", "18:45:00", "21:05:59"], name="hora", dtype="string")
         output = tmp_output_dir / "time_of_day_hora.png"
         assert plot_time_of_day(series, output) is True
+        assert output.exists()
+
+
+class TestDatesOverTime:
+    """Dates were charted as row number against the date text, with one axis label per distinct day."""
+
+    def test_datetime_stats_read_two_digit_year_dates(self, recwarn):
+        from eda_pipeline.univariate_analysis import analyze_datetime
+
+        series = pd.Series(["11/9/07", "11/28/08", "12/1/09", None], name="Date Egg", dtype="string")
+        stats = analyze_datetime(series)
+        assert (stats.count, stats.missing) == (3, 1)
+        assert (stats.min_date, stats.max_date) == ("2007-11-09", "2009-12-01")
+        assert not [w for w in recwarn if issubclass(w.category, UserWarning)]  # no format guessing
+
+    def test_datetime_stats_read_ambiguous_dates_day_first(self):
+        from eda_pipeline.univariate_analysis import analyze_datetime
+
+        # The same day-first preference type detection uses; a bare pd.to_datetime reads May 3rd.
+        series = pd.Series(["05/03/07", "20/03/07", "06/04/07"], name="fecha", dtype="string")
+        assert analyze_datetime(series).min_date == "2007-03-05"
+
+    def test_rows_are_counted_per_day_over_a_few_weeks(self):
+        from eda_pipeline.visualizations import rows_per_period
+
+        dates = pd.Series(pd.to_datetime(["2023-01-01", "2023-01-01", "2023-01-03", "2023-01-17"]))
+        counts, period = rows_per_period(dates)
+        assert period == "día"
+        assert len(counts) == 17  # every day of the span, the empty ones included
+        assert counts.iloc[0] == 2
+        assert counts.iloc[1] == 0
+        assert counts.sum() == 4
+
+    def test_a_longer_span_is_counted_per_week_or_month(self):
+        from eda_pipeline.visualizations import rows_per_period
+
+        year = pd.Series(pd.date_range("2024-01-01", "2024-12-31", freq="D"))
+        counts, period = rows_per_period(year)
+        assert period == "semana"
+        assert counts.sum() == len(year)
+
+        years = pd.Series(pd.date_range("2019-01-01", "2024-05-31", freq="D"))
+        counts, period = rows_per_period(years)
+        assert period == "mes"
+        assert len(counts) == 65
+
+    def test_the_time_series_plot_is_written_for_text_dates(self, tmp_output_dir):
+        from eda_pipeline.visualizations import plot_time_series
+
+        series = pd.Series(["11/9/07", "11/12/07", "11/28/08", "12/1/09"] * 5, name="Date Egg", dtype="string")
+        output = tmp_output_dir / "timeseries_Date Egg.png"
+        assert plot_time_series(series, output) is True
         assert output.exists()
 
 

@@ -101,6 +101,13 @@ _DATE_FORMATS: tuple[str, ...] = (
     "%m/%d/%Y",
     "%m/%d/%Y %H:%M:%S",
     "%m-%d-%Y",
+    # Two-digit years, last so a four-digit year always wins, and day-first before month-first as
+    # above. Date Egg in penguins_lter ("11/11/07") was read as a category with 50 values; across
+    # the 19 datasets in data/raw these formats change no other column.
+    "%d/%m/%y",
+    "%d-%m-%y",
+    "%m/%d/%y",
+    "%m-%d-%y",
 )
 
 _DATE_SUCCESS_RATIO_THRESHOLD = 0.9
@@ -139,9 +146,10 @@ def _detect_datetime_series(valid: pd.Series, sample_size: int = 200) -> bool:
     return False
 
 
-def _coerce_to_datetime(series: pd.Series) -> pd.Series:
+def coerce_to_datetime(series: pd.Series) -> pd.Series:
     """
-    Convert a series to datetime for an explicit ``column_types.datetime`` override.
+    Convert a series to datetime, for an explicit ``column_types.datetime`` override and wherever
+    a column inferred as a date is read as one (statistics, time series).
 
     Tries the same day-first-preferring explicit formats used for detection
     (``_DATE_FORMATS``) and keeps whichever parses the most values. Plain
@@ -448,7 +456,7 @@ def apply_column_type_overrides(
 
     for col in _known(overrides.datetime):
         before_na = int(df[col].isna().sum())
-        df[col] = _coerce_to_datetime(df[col])
+        df[col] = coerce_to_datetime(df[col])
         n_failed = int(df[col].isna().sum()) - before_na
         if n_failed > 0:
             result.coercion_failures[col] = n_failed

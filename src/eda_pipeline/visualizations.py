@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib import MatplotlibDeprecationWarning
 
-from .type_inference import parse_time_of_day
+from .type_inference import coerce_to_datetime, parse_time_of_day
 
 logger = logging.getLogger(__name__)
 
@@ -316,19 +316,53 @@ def plot_scatter(x: pd.Series, y: pd.Series, output_path: Path, sample_size: int
     return True
 
 
+# A time series shows at most this many points: the finest of day, week, month or year that fits.
+# On the datasets in data/raw that gives days for a 16-day span, weeks for a year (Sales_Receipts),
+# weeks for the two seasons of Date Egg and months for the five years of customer_since.
+TIME_SERIES_MAX_PERIODS = 120
+_TIME_SERIES_PERIODS = (("D", "día", 1.0), ("W", "semana", 7.0), ("M", "mes", 30.44), ("Y", "año", 365.25))
+
+
+def rows_per_period(dates: pd.Series) -> tuple[pd.Series, str]:
+    """
+    Rows per period over the whole span of `dates`, empty periods included as zero, and the period's
+    Spanish name. The period is the finest one that keeps the series within TIME_SERIES_MAX_PERIODS.
+    """
+    span_days = (dates.max() - dates.min()).days
+    for freq, label, days in _TIME_SERIES_PERIODS:
+        if span_days / days + 1 <= TIME_SERIES_MAX_PERIODS or freq == "Y":
+            break
+    periods = dates.dt.to_period(freq)
+    every_period = pd.period_range(periods.min(), periods.max(), freq=freq)
+    return periods.value_counts().reindex(every_period, fill_value=0), label
+
+
 @safe_plot
 def plot_time_series(series: pd.Series, output_path: Path) -> bool:
-    """Plot time series."""
-    valid = series.dropna()
-    if len(valid) < 2:
-        return False
+    """
+    Rows per day, week, month or year: when the records happen, with the empty periods at zero.
 
+    It used to plot the row number against the date itself, which for dates stored as text drew
+    one axis label per distinct day (366 of them on Sales_Receipts) and said nothing about time.
+    """
+    dates = series.dropna()
+    if not pd.api.types.is_datetime64_any_dtype(dates):
+        dates = coerce_to_datetime(dates)
+    dates = dates.dropna()
+    if dates.nunique() < 2:
+        return False
+    if dates.dt.tz is not None:
+        dates = dates.dt.tz_localize(None)
+
+    counts, period = rows_per_period(dates)
     fig, ax = plt.subplots(figsize=(14, 6))
-    ax.plot(valid.index, valid.values, linewidth=1)
-    ax.set_title(f"Serie Temporal: {series.name}")
-    ax.set_xlabel("Tiempo")
-    ax.set_ylabel(series.name)
+    ax.plot(counts.index.to_timestamp(), counts.values, linewidth=1.5)
+    ax.set_title(f"Registros por {period}: {series.name}")
+    ax.set_xlabel("Fecha")
+    ax.set_ylabel("Filas")
+    ax.set_ylim(bottom=0)
     ax.grid(True, alpha=0.3)
+    fig.autofmt_xdate()
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     return True
