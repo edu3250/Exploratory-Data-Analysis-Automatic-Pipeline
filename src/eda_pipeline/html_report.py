@@ -631,6 +631,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if plots.histograms %}
         <h3>Distribuciones Numéricas ({{ plots.histograms | length }})</h3>
+        {% if log_scale_columns %}
+        <p style="color: #555; margin-top: -8px;">
+            Con escala logarítmica a la derecha de la lineal: <strong>{{ log_scale_columns | join(", ") }}</strong>.
+            Se usa cuando el 90 % central de las filas ocupa menos del 30 % del eje, el logaritmo al menos duplica
+            ese espacio y como mucho el 5 % de los valores son 0 o negativos (esos quedan fuera del panel logarítmico).
+        </p>
+        {% endif %}
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             {% for img in plots.histograms %}
             <div class="plot-container">
@@ -642,6 +649,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if plots.boxplots %}
         <h3>Boxplots ({{ plots.boxplots | length }})</h3>
+        {% if log_scale_columns %}
+        <p style="color: #555; margin-top: -8px;">
+            Con escala logarítmica a la derecha de la lineal: <strong>{{ log_scale_columns | join(", ") }}</strong>.
+        </p>
+        {% endif %}
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             {% for img in plots.boxplots %}
             <div class="plot-container">
@@ -695,6 +707,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if plots.scatter %}
         <h3>Scatter Plots (Pares con Mayor Correlación)</h3>
+        {% if log_scale_columns %}
+        <p style="color: #555; margin-top: -8px;">
+            Con escala logarítmica a la derecha de la lineal: <strong>{{ log_scale_columns | join(", ") }}</strong>.
+        </p>
+        {% endif %}
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             {% for img in plots.scatter %}
             <div class="plot-container">
@@ -727,6 +744,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="plot-container">
             <img src="data:image/png;base64,{{ plots.pair_plot[0] }}" alt="Pair plot">
         </div>
+        {% if plots.pair_plot_log %}
+        <p style="color: #555;">
+            El mismo pair plot con escala logarítmica (log10) en
+            <strong>{% for col in pair_plot.columns if col in log_scale_columns %}{{ col }}{% if not loop.last %}, {% endif %}{% endfor %}</strong>,
+            para compararlo con el de arriba. Se omiten las filas con valores 0 o negativos en esas columnas.
+        </p>
+        <div class="plot-container">
+            <img src="data:image/png;base64,{{ plots.pair_plot_log[0] }}" alt="Pair plot (log10)">
+        </div>
+        {% endif %}
         {% endif %}
 
         {% if plots.timeseries %}
@@ -781,6 +808,7 @@ def generate_html_report(
     data_preview: Optional[pd.DataFrame] = None,
     time_stats: Optional[dict] = None,
     pair_plot=None,
+    log_scale_columns: Optional[list] = None,
 ) -> str:
     """
     Generate HTML report with embedded base64 images.
@@ -793,6 +821,7 @@ def generate_html_report(
         data_preview: The analysed DataFrame; its first rows open the report body.
         time_stats: ``{column: TimeOfDayStats}`` for the time-of-day columns.
         pair_plot: The ``PairPlotSpec`` the pair plot was drawn from, described next to it.
+        log_scale_columns: Columns drawn with a log scale next to the linear chart.
 
     Returns:
         Path to generated HTML file
@@ -824,6 +853,7 @@ def generate_html_report(
         "categorical_stats": categorical_stats,
         "time_stats": time_stats or {},
         "pair_plot": pair_plot,
+        "log_scale_columns": log_scale_columns or [],
         "pair_plot_min_eta": PAIR_PLOT_MIN_HUE_ETA,
         "correlations": correlations,
         "numeric_pairs": correlations.get("numeric_pairs", []),

@@ -31,7 +31,7 @@ from .type_inference import (
     infer_all_types,
 )
 from .univariate_analysis import UnivariateReport, analyze_univariate
-from .visualizations import choose_pair_plot, generate_all_visualizations
+from .visualizations import choose_pair_plot, generate_all_visualizations, log_scale_columns
 
 
 class TargetColumnNotFoundError(ValueError):
@@ -418,6 +418,9 @@ class EDAPipeline:
             combined_alerts.append(target_missing_alert)
         combined_alerts.sort(key=lambda a: (SEVERITY_ORDER.get(a.severity, 999), a.column or ""))
 
+        self.logger.info("Checking which columns need a log scale...")
+        log_scale = self._run_step("log_scale", failed_steps, log_scale_columns, df, column_types, default={}) or {}
+
         self.logger.info("Choosing the pair plot...")
         pair_plot = self._run_step(
             "pair_plot",
@@ -453,6 +456,7 @@ class EDAPipeline:
                 target_type=target_report.target_type if target_report else None,
                 time_cols=time_cols,
                 pair_plot=pair_plot,
+                log_scale=log_scale,
                 default={},
             )
             or {}
@@ -516,6 +520,7 @@ class EDAPipeline:
             data_preview=df,
             time_stats=univariate_report.time_stats,
             pair_plot=pair_plot,
+            log_scale_columns=list(log_scale),
             default=None,
         )
 
@@ -569,6 +574,7 @@ class EDAPipeline:
                 },
             },
             "pair_plot": asdict(pair_plot) if pair_plot else None,
+            "log_scale_columns": {col: asdict(check) for col, check in log_scale.items()},
             "failed_steps": failed_steps,
         }
 
