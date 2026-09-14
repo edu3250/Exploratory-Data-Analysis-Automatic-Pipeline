@@ -396,3 +396,89 @@ Verified with real output:
 - Rendered and checked by eye on `discount_pct`, `quantity`, `product_category`, and stroke's `gender` (`Other: <0.1 % (1)`), `work_type` and `ever_married`. The palette validator of the dataviz guidance needs Node, which is not installed; the report's palette was kept, and no slice depends on colour alone.
 - On the new penguin datasets (`reports/penguins_batch_20260913_181715`), `penguins_size` gets 3 pies (species, island, sex) and `penguins_lter` 5 (studyName, Species, Island, Sex, Clutch Completion); `Comments` (7 categories) and `Date Egg` (50) keep bars only. The species shares match the CSV: 44.2% / 36.0% / 19.8%.
 - The Vistara batch regenerated on `main` (`reports/Vistara_batch_20260913_181954`) holds 15 pies across its 8 files, among them `Products.product_category` and `Order_Details` `discount_pct` and `quantity`; `product_id` (40), `month_name` (12), `product_type` (19) and `color` (14) keep bars only. Outlier counts and alerts are identical to the previous batch, and no file has a failed step.
+
+## Stage 19: Scatter plots of the most correlated pairs
+**Goal**: The section is titled «Scatter Plots (Pares con Mayor Correlación)», but the code drew the first `max_scatter_pairs` numeric pairs in column order and never looked at the correlation. Found reviewing the penguin datasets.
+
+**Success Criteria**:
+- Pairs are ranked by |r| from the Pearson matrix the relationships step computes (recomputed if that step failed), strongest first, sign kept, undefined correlations left out.
+- Each plot shows its r in the title.
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (all failed before the change):
+- `tests/test_modules.py::TestScatterPairs`: `test_pairs_come_strongest_first_whatever_their_sign`, `test_limit_is_respected_and_undefined_correlations_are_left_out`, `test_no_matrix_no_pairs`.
+- `tests/test_integration.py::TestOutputCompleteness::test_scatter_plots_show_the_most_correlated_pairs` (drew `scatter_a_vs_b.png`, the first pair, on the old code).
+
+**Status**: COMPLETE. PR #24 was merged on 2026-09-14 as `c2e272e`, and its branch was deleted.
+
+Verified with real output:
+- **213 tests passed** on the branch (209 + 4 new). Ruff clean.
+- Measured before the code: every dataset with more than 10 numeric pairs was affected, 7 of the 19 in `data/raw`. The strongest pair was not drawn on `credito_asegurado` (|r| = 1.00, 8 of 10 plots from the weaker half of the ranking), `penguins_lter` (|r| = 0.87, 7 of 10) and `siniestros` (|r| = 0.98).
+- On `penguins_lter` the 10 plots are now exactly the top 10 of the ranking, including `Flipper Length (mm) vs Body Mass (g) (r = 0.87)`.
+
+## Stage 20: Row counters are identifiers
+**Goal**: `Sample Number` in `penguins_lter` (1 to 152) numbers the samples, but was analysed as a continuous measure: histogram, boxplot, VIF entry and 6 of the 10 scatter plots. The identifier-by-name rule knows `id` and `key`; widening it to "number" would catch real counts such as `numero_creditos`.
+
+**Success Criteria**:
+- An integer column with more distinct values than the discrete threshold whose row-to-row step is exactly +1 on at least 90% of its rows is an identifier.
+- A count covering every value from 1 up in no particular order, and a sorted measure with repeats, stay numeric.
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (the first two failed before the change; the two guards were green before and after):
+- `tests/test_modules.py::TestTypeInference::test_sequence_number_is_an_identifier`.
+- `tests/test_integration.py::TestOutputCompleteness::test_sequence_number_columns_are_not_analysed_as_variables`.
+- Guards: `test_shuffled_count_covering_every_value_stays_numeric`, `test_sorted_measure_with_repeats_stays_numeric`.
+- Three existing tests built their data as counters (`range()`, `20 + i % 50`) and failed under the new rule: `test_amount_with_almost_unique_values_stays_numeric`, `test_name_merely_ending_in_id_is_not_an_identifier` and `test_numeric_id_columns_are_not_analysed_as_variables`. Their data is now shuffled, random or stepped by 7, and each still checks what it was written for.
+
+**Status**: COMPLETE. PR #25 was merged on 2026-09-14 as `467e3ef`, and its branch was deleted.
+
+Verified with real output:
+- **213 tests passed** on the branch (209 + 4 new). Ruff clean.
+- Measured before the code, over every integer column with more than 20 values in the 19 datasets: `Sample Number` steps by +1 on 99.4% of its rows; no measure exceeds 18.3% (`numero_mensualidades_no_pagadas`). Coverage of 1..max is no signal: `units_sold` and `days_to_close` reach 100% with 0.9% of +1 steps.
+- Differential run over the 19 datasets: only `Sample Number` changes type, and the alert count stays at 21.
+
+## Stage 21: Two-digit-year dates, and dates charted as dates
+**Goal**: `Date Egg` in `penguins_lter` (`11/11/07`) was read as a category with 50 values, because the date formats only accepted four-digit years. Two things downstream did not treat dates as dates either: the date statistics parsed text with a bare `pd.to_datetime` (reading `05/03/07` as May 3rd, with a `UserWarning`), and the time series plotted the row number against the date value, one axis label per distinct day (366 on `Sales_Receipts`), for every date column.
+
+**Success Criteria**:
+- `%d/%m/%y`, `%d-%m-%y`, `%m/%d/%y` and `%m-%d-%y` are accepted, after every four-digit format and day-first before month-first.
+- Date statistics read text with the same explicit formats (`coerce_to_datetime`, now public).
+- The time series counts rows per day, week, month or year — the finest period that keeps it under 120 points — with empty periods at zero.
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (`test_the_time_series_plot_is_written_for_text_dates` is a contract, green before and after; the other 8 failed before the change):
+- `tests/test_modules.py::TestTypeInference::test_dates_with_a_two_digit_year_are_dates`, `test_two_digit_year_dates_parse_to_the_right_day`, `test_ambiguous_two_digit_year_dates_read_day_first`.
+- `tests/test_modules.py::TestDatesOverTime`: stats read two-digit years without warnings; ambiguous dates day-first; rows per day over a few weeks; per week or month over longer spans; the plot is written for text dates.
+- `tests/test_integration.py::TestOutputCompleteness::test_two_digit_year_dates_are_analysed_as_dates`.
+
+**Status**: COMPLETE. PR #26 was merged on 2026-09-14 as `d6506ee`, and its branch was deleted.
+
+Verified with real output:
+- **218 tests passed** on the branch (209 + 9 new). Ruff clean.
+- Type differential over the 19 datasets: only `Date Egg` changes type.
+- `Date Egg` spans 2007-11-09 to 2009-12-01 and its weekly chart shows the three November laying seasons; `Sales_Receipts.transaction_date` is weekly, about 3 900 sales a week with peaks in January, May and November–December; `Customers.customer_since` is monthly over five years. No `UserWarning` reading any of them.
+
+## Stage 22: Punctuation-only cells are missing values
+**Goal**: `sex` in both penguin datasets holds one `.` among `MALE` and `FEMALE`. pandas leaves such a cell as text, so the report counted a third sex: a bar, a 0.3% slice of the pie, and an understated missing share.
+
+**Success Criteria**:
+- Before any analysis, a cell holding only `.`, `-`, `?`, `_`, `*` or `/` becomes a missing value; text that merely contains punctuation is kept.
+- A text column whose remaining values are all numbers becomes numeric.
+- Each affected column gets a low-severity alert naming the markers and counts, and `summary.json` lists them under `data_quality.missing_placeholders`.
+- `ruff check .` and `ruff format --check .` are clean.
+
+**Tests** (all failed before the change):
+- `tests/test_modules.py::TestMissingValuePlaceholders`: 4 tests (replaced and counted; text with punctuation kept; numbers recovered; nothing to replace leaves the frame as it was).
+- `tests/test_integration.py::TestOutputCompleteness::test_missing_value_placeholders_are_reported_and_not_analysed`.
+
+**Status**: COMPLETE. PR #27 was merged on 2026-09-14 as `818a6f8`, and its branch was deleted.
+
+Verified with real output:
+- **214 tests passed** on the branch (209 + 5 new). Ruff clean.
+- Across the 19 datasets only the two penguin `sex` columns hold such cells, one `.` each.
+- `penguins_size`: `sex` has 2 categories, 3.20% missing (11 of 344, matching the CSV), a pie of MALE 50.5% / FEMALE 49.5% (n = 333), and one alert.
+
+## Stages 19 to 22 together
+- The four branches were checked pairwise and merge cleanly in any order. The tree with all four merged, before any was on `main`, passed **231 tests**; ruff clean. `main` after the four merges: **231 passed**, ruff clean.
+- The penguin batch regenerated on `main` (`reports/penguins_batch_20260913_193213`) confirms all four findings resolved: on `penguins_lter` the 10 scatter plots are the top 10 pairs by |r|, `Date Egg` is a date with a time series, `Sample Number` is an identifier with no plot and no VIF entry, and `Sex` has 2 categories with 3.20% missing and an alert naming the `.`; `penguins_size` shows the same for its 6 pairs and `sex`. Shapes match the CSVs and no step failed.
+- The Vistara batch (`reports/Vistara_batch_20260913_193243`) keeps every type, alert and outlier count of the previous one: none of its files has more than 5 numeric columns, so every pair was already drawn, and it holds no two-digit years, counters or placeholders. Its date columns now get the per-period time series. The mortgage batch (`reports/mx_batch_20260913_193455`), the one most affected by stage 19, now draws the strongest pair on each file, including `monto_credito` vs `saldo_principal` (|r| = 1.00) on `credito_asegurado`; all four files match their CSV row counts with no failed step.
