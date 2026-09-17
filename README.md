@@ -1,773 +1,141 @@
-# Pipeline de Análisis Exploratorio de Datos (EDA)
+# EDA Pipeline
 
-Un pipeline completo y automatizado para realizar análisis exploratorio de datos en cualquier dataset tabular. Genera reportes HTML interactivos, detección de calidad de datos, análisis estadísticos, detección de outliers, y visualizaciones en una única ejecución.
+**One command turns any tabular file into a self-contained HTML report** — data quality, statistics,
+outliers, relationships, target analysis, 40+ charts, and a preprocessing plan where every
+recommendation carries the measurement that produced it.
 
-## Características
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![tests 315](https://img.shields.io/badge/tests-315%20passing-brightgreen)
+![coverage 92%](https://img.shields.io/badge/coverage-92%25-brightgreen)
+![ruff](https://img.shields.io/badge/lint-ruff%20clean-purple)
+![license MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
-- **Carga de datos flexible**: CSV, TSV, Excel, Parquet, JSON/JSONL con detección automática de delimitador, codificación y separador decimal
-- **Inferencia de tipos semánticos**: Automático reconocimiento de numéricos, categóricos, datetime, horas del día, texto, identificadores, constantes
-- **Análisis de calidad de datos**: Valores faltantes, duplicados, columnas constantes, cardinalidad alta, tipos mixtos
-- **Análisis univariado**: Estadísticas descriptivas (media, mediana, desv.est., skewness, kurtosis), pruebas de normalidad, frecuencias
-- **Detección de outliers**: IQR, MAD (z-score robusto), Isolation Forest multivariado
-- **Análisis de relaciones**: Correlación Pearson, Cramér's V (categóricas), correlation ratio (mixtas), detección de multicolinealidad (VIF)
-- **Análisis de target**: Auto-detección clasificación/regresión, balance de clases, relaciones feature-target, detección de fugas
-- **Visualizaciones**: Histogramas, boxplots, gráficos categóricos (barras, y pie charts en porcentaje para las columnas con pocas categorías), barras agrupadas del target frente a cada categórica, matriz de correlaciones, mapa de nulos, scatter plots, series temporales — todos los gráficos generados se incluyen en el reporte
-- **Reportes**: HTML auto-contenido (offline), JSON estructurado (`summary.json`), tablas CSV de resultados (`tables/`)
-- **Batch processing**: Procesa todos los archivos soportados de una carpeta, uno a la vez; un archivo que falla no aborta el resto
-- **Configuración flexible**: YAML + overrides de CLI, con validación y mensajes de error claros
-- **CLI en español**: Comandos y ayuda completamente en español
+![The report the pipeline generates](docs/report-preview.png)
 
-## Instalación
+<sub>A real report from `data/raw/spaceship_titanic.csv` (8 693 × 14). Below the summary, the chart
+the pipeline drew for `RoomService`: 65.5% of its rows are 0, so the column is drawn a second time
+without them — that is the only way its distribution is visible at all.</sub>
 
-### Requisitos previos
+---
 
-- Python 3.10+
-- pip
+## Quick start
 
-### Setup
+```bash
+python -m venv .venv && .venv/Scripts/activate   # source .venv/bin/activate on Linux/macOS
+python -m pip install -e .
 
-```powershell
-# Clonar o descargar el proyecto
-cd D:\DataScience\Pipeline
-
-# Instalar en modo desarrollo (usa el entorno virtual del proyecto)
-.\.venv\Scripts\python.exe -m pip install -e .
-
-# O instalar los requisitos directamente
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+# any CSV, TSV, Excel, Parquet or JSON file; --target is optional
+python -m eda_pipeline analyze-file your_data.csv --target your_label_column
 ```
 
-### Para desarrollo y testing
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-```
-
-## Uso
-
-### 1. Analizar un archivo único
-
-```powershell
-# CSV simple (delimitador, codificación y separador decimal se auto-detectan)
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-file data.csv
-
-# Con target (clasificación/regresión, auto-detectado si no se indica --target-type)
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-file data.csv --target categoria
-
-# Con encoding, delimitador y separador decimal explícitos
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-file data.csv --encoding latin-1 --delimiter ";" --decimal ","
-
-# Excel: por defecto se usa la primera hoja; --sheet acepta nombre o índice
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-file datos.xlsx --sheet 1
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-file datos.xlsx --sheet "Hoja2"
-
-# Con directorio de salida personalizado
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-file data.csv --output-dir mis_reportes
-```
-
-Si `--target` no existe en el dataset, el comando termina con código de salida distinto de cero
-y un mensaje en español que lista las columnas disponibles (y una sugerencia si el nombre es
-parecido a una columna real).
-
-### 2. Procesar múltiples archivos
-
-```powershell
-# Todos los archivos con extensión soportada en una carpeta (los ocultos, ej. .gitkeep,
-# y las extensiones no soportadas se omiten con un aviso; no abortan el lote)
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-batch ./data
-
-# Solo CSVs
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-batch ./data --pattern "*.csv"
-
-# Con target y las mismas opciones de carga que analyze-file
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-batch ./data --target target_col --target-type classification
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-batch ./data --delimiter ";" --encoding cp1252 --decimal "," --sheet 0
-```
-
-Cada archivo se carga y analiza de a uno (no se cargan todos en memoria antes de empezar). Un
-archivo que falla al cargar o analizar se reporta con ❌ y el resto del lote continúa, salvo que
-se use `--strict` (en cuyo caso se detiene en el primer error). Si dos archivos comparten el mismo
-nombre base pero distinta extensión (p. ej. `sales.csv` y `sales.parquet`), sus resultados se
-nombran `sales_csv` y `sales_parquet` para no pisarse — tanto en las claves del resultado como en
-el nombre de la carpeta de salida. Si el target configurado no existe en un dataset del lote, se
-registra una advertencia y se agrega una alerta a ese reporte, mientras el resto del análisis
-continúa sin target (a diferencia de `analyze-file`, donde falta el target aborta ese archivo).
-
-### 3. Crear archivo de configuración
-
-```powershell
-.\.venv\Scripts\python.exe -m eda_pipeline init-config
-
-# O con ruta personalizada
-.\.venv\Scripts\python.exe -m eda_pipeline init-config --output mi_config.yaml
-```
-
-### 4. Usar configuración YAML
-
-Editar `config/default.yaml` (creado con `init-config`):
-
-```yaml
-# Tipo de archivo (auto-detecta por extensión si es None)
-file_format: null
-
-# Para CSVs (todo se auto-detecta si se deja en null)
-delimiter: null
-encoding: null
-decimal: null          # null = auto-detecta '.' o ',' según el delimitador y el contenido
-
-# Para Excel
-excel_sheet: null       # null = primera hoja; nombre o índice si se especifica
-
-sample_size: null
-batch_pattern: null     # patrón glob para analyze-batch; null = todas las extensiones soportadas
-
-# Tipos de columnas (overrides sobre la inferencia automática)
-column_types:
-  numeric:              # fuerza conversión con pd.to_numeric (errors="coerce")
-    - edad
-    - ingreso
-  categorical:
-    - region
-    - categoria
-  datetime: []          # fuerza conversión con pd.to_datetime (errors="coerce")
-  text: []
-  ignore:               # excluye estas columnas de TODO el análisis
-    - id_interno
-
-# Configuración de análisis
-data_quality:
-  missing_threshold: 0.95      # (0, 1]
-  cardinality_threshold: 100   # entero positivo
-  duplicate_threshold: 0.1     # (0, 1]; controla la severidad de la alerta de duplicados
-  constant_threshold: 0.99     # (0, 1]
-
-outliers:
-  iqr_multiplier: 1.5
-  z_score_threshold: 3.0
-  isolation_forest_enabled: true
-  isolation_forest_contamination: null  # null = corte según las puntuaciones; un número = % fijo
-
-visualizations:
-  max_histograms: 20
-  max_boxplots: 20
-  max_correlation_heatmap_size: 30
-  max_scatter_pairs: 10
-  correlation_threshold: 0.05
-
-target:
-  target_column: null
-  target_type: null              # null = auto-detecta; "classification" o "regression"
-  class_imbalance_threshold: 0.8 # se marca desbalanceado si la clase mayoritaria supera este %
-
-output_dir: "reports"
-strict_mode: false   # true = detener todo el análisis en el primer error (dataset o paso)
-verbose: false        # true = logging a nivel DEBUG
-```
-
-Todas las claves anteriores son las únicas reconocidas: una clave desconocida (mal escrita, o de
-una versión anterior) hace que el comando falle con un mensaje en español que lista las claves
-válidas, y con código de salida 2. La clave `language`, presente en configuraciones antiguas, ya
-no tiene efecto: si aparece se ignora con una advertencia de depreciación, en vez de fallar.
-
-El orden de precedencia es **valores por defecto < archivo YAML < opciones de CLI**: una opción de
-CLI solo se aplica si el usuario la pasó explícitamente (de lo contrario no pisa lo que diga el
-YAML), y las secciones anidadas (`target`, `data_quality`, etc.) se combinan clave por clave en
-vez de reemplazarse por completo (p. ej. `--target` no borra un `class_imbalance_threshold` que
-venga del YAML).
-
-Luego usar:
-
-```powershell
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-file data.csv --config config/default.yaml
-```
-
-## Ejemplos Completos
-
-### Ejemplo 1: Dataset de clasificación desbalanceado
-
-```powershell
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-file transactions.csv `
-  --target is_fraud `
-  --output-dir ./fraud_analysis `
-  --target-type classification
-```
-
-Genera:
-- `fraud_analysis/<dataset>_<timestamp>/report.html` – Reporte interactivo con análisis de balance, features importantes, alertas de desbalance
-- `fraud_analysis/<dataset>_<timestamp>/summary.json` – Resultados estructurados
-- `fraud_analysis/<dataset>_<timestamp>/plots/` – Gráficos PNG
-- `fraud_analysis/<dataset>_<timestamp>/tables/` – Tablas CSV de resultados
-
-### Ejemplo 2: Dataset con encoding y decimal latinos
-
-```powershell
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-file datos_argentina.csv `
-  --encoding cp1252 `
-  --delimiter ";" `
-  --decimal ","
-```
-
-Estas tres opciones son opcionales: si el archivo usa `;` como delimitador y valores como `"4,0"`
-en columnas numéricas, el separador decimal `,` se detecta automáticamente sin pasar `--decimal`.
-
-### Ejemplo 3: Procesamiento batch
-
-```powershell
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-batch ./raw_data `
-  --pattern "*.xlsx" `
-  --target "categoria" `
-  --output-dir ./eda_reports
-```
-
-Procesa todos los `.xlsx` en `./raw_data`. Cada archivo tiene su propio reporte y todos quedan
-juntos en una única carpeta de la ejecución: `eda_reports/raw_data_batch_<timestamp>/<archivo>/`.
-
-## Estructura de Salida
-
-Un solo archivo (`analyze-file`) deja una carpeta con su marca de tiempo:
+That writes one folder under `reports/`:
 
 ```
-reports/
-├── dataset_20250910_143025/
-│   ├── report.html           # Reporte principal (auto-contenido, abre en navegador)
-│   ├── summary.json          # Resultados en JSON (máquina-legible), incluye failed_steps
-│   ├── plots/
-│   │   ├── histogram_age.png
-│   │   ├── boxplot_age.png
-│   │   ├── categorical_region.png
-│   │   ├── correlation_heatmap.png
-│   │   ├── association_heatmap.png
-│   │   ├── missing_matrix.png
-│   │   ├── scatter_age_vs_income.png
-│   │   ├── timeseries_date.png
-│   │   └── ... (todos los gráficos generados aparecen también en report.html)
-│   └── tables/
-│       ├── numeric_stats.csv
-│       ├── categorical_stats.csv
-│       ├── missing_per_column.csv
-│       ├── correlations.csv
-│       ├── outlier_summary.csv
-│       └── alerts.csv
-│
-└── dataset2_20250910_144000/
-    ├── report.html
-    ├── summary.json
-    ├── plots/
-    └── tables/
+reports/your_data_20260917_112601/
+├── report.html      # the whole report, offline, images embedded — just open it
+├── summary.json     # every measurement, machine-readable
+├── plots/           # one PNG per chart (40 for the report above)
+└── tables/          # 7 CSV tables (stats, correlations, outliers, alerts, the plan)
 ```
 
-Un lote (`analyze-batch`) agrupa **todos** los reportes de esa ejecución en una sola carpeta,
-`<carpeta_de_entrada>_batch_<timestamp>`, con una subcarpeta por archivo. Las subcarpetas no llevan
-marca de tiempo propia, porque ya la lleva la carpeta del lote:
+The report in the screenshot came from Kaggle's Spaceship Titanic training file. `data/` is not
+tracked, so bring your own — the pipeline detects delimiter, encoding, decimal separator and column
+types on its own.
 
-```
-reports/
-└── Vistara_batch_20250910_143025/
-    ├── Customers/
-    │   ├── report.html
-    │   ├── summary.json
-    │   ├── plots/
-    │   └── tables/
-    ├── Order_Details/
-    │   └── ...
-    └── Sales_Receipts/
-        └── ...
-```
+`analyze-batch <folder>` does the same for every supported file in a folder (CSV, TSV, Excel,
+Parquet, JSON/JSONL), grouping the reports of one run into a single folder. A file that fails does
+not abort the rest. `init-config` writes a YAML you can edit to override anything: delimiters,
+encodings, column types, thresholds, which charts to draw.
 
-Así, ocho archivos de entrada dejan **una** carpeta en `reports/` en vez de ocho, y dos ejecuciones
-del mismo lote no se mezclan. La ruta de la carpeta se muestra al terminar y queda en el log.
+Run `python -m eda_pipeline --help` for the rest.
 
-En la sección «Calidad de Datos» del HTML, la tabla «Tipo y Valores Faltantes por Columna» indica
-para cada columna el tipo de dato con el que quedó almacenada (`int`, `float`, `texto`, `fecha`…,
-con el tipo exacto de pandas —`Int64`, `string`…— al pasar el cursor) y la categoría que le asignó
-el pipeline (Numérica continua, Categórica, Identificador, Fecha/hora…). Esa categoría es la que
-decide qué análisis y qué alertas recibe la
-columna, así que es el primer sitio donde mirar si algo quedó mal clasificado. Las mismas dos
-columnas aparecen en `tables/missing_per_column.csv`.
+## What the report contains
 
-Los logs de cada ejecución NO se guardan dentro de la carpeta del reporte, sino en una carpeta
-`logs/` hermana del directorio de salida (`<output_dir>/../logs/eda_<timestamp>_<correlation_id>.log`).
-Por ejemplo, con `--output-dir reports` los logs quedan en `logs/`, junto a `reports/`.
-
-## Configuración de Análisis
-
-### Tipos de Datos Detectados Automáticamente
-
-- **numeric_continuous**: Float, muchos valores únicos (ej: edad, salario)
-- **numeric_discrete**: Int, pocos valores únicos (ej: num_hijos, rating 1-5)
-- **categorical**: Texto cuyos valores se repiten (ej: región, género, causa de incumplimiento), sin
-  importar lo largas que sean las etiquetas. Con hasta 20 valores distintos siempre es categórica;
-  por encima de eso lo sigue siendo mientras la mayoría de las filas repitan valores.
-- **boolean**: True/False, sí/no
-- **datetime**: Fecha/hora; para columnas de texto, solo se reconocen formatos explícitos
-  (ISO 8601, `dd/mm/aaaa`, `mm/dd/aaaa`, `dd-mm-aaaa`, con o sin hora, y también con el año en dos
-  dígitos: `dd/mm/aa`, `mm/dd/aa`) con una proporción alta de aciertos, priorizando día-primero en
-  casos ambiguos. Los valores numéricos con separador decimal no se confunden con fechas. Sus
-  estadísticas se calculan leyendo la columna con esos mismos formatos, y la serie temporal cuenta
-  las filas por día, semana, mes o año (el periodo más fino que no pase de 120 puntos), con los
-  periodos vacíos en cero.
-- **time**: Hora del día sin fecha (`11:43:47`, `09:30`). Se exige que más del 90 % de los
-  valores tengan esa forma y que un reloj pueda mostrarlos: `25:30` no es una hora. El reporte
-  muestra la primera y la última hora, la hora pico y un gráfico de barras por hora (00 a 23), en
-  vez de tratar cada instante como una categoría. Nunca genera alertas de cardinalidad. Una
-  duración escrita igual (`00:45:10`) no se distingue de una hora del día.
-- **text**: Texto libre: más de 20 valores distintos y más de la mitad de las filas con un valor
-  diferente (ej: comentarios, descripciones, direcciones)
-- **identifier**: Códigos que nombran una entidad (IDs): alfanuméricos sin espacios, con letras y
-  dígitos (ej: `CUST-00001`, `ORD-2024-000001`). También los **números enteros cuyo nombre de
-  columna los marca como clave** (`id`, `customer_id`, `id_cliente`, `orderId`, `row_key`), con
-  más valores distintos que el umbral de discretas; así `id` deja de recibir histograma,
-  correlaciones y gráficos de dispersión. Un importe con valores casi únicos, como
-  `monto_siniestro`, sigue siendo numérico: manda el nombre, no la unicidad. Se reconocen tanto los únicos por fila (clave
-  primaria) como los que se repiten (clave foránea) en cuanto superan `cardinality_threshold`
-  valores distintos. Por debajo de ese umbral un código sigue siendo una categoría útil para
-  agrupar (ej: 40 `product_id`). Los identificadores nunca generan alertas de cardinalidad.
-  Un entero que **sube de uno en uno de una fila a la siguiente** en al menos el 90 % de las filas
-  es un contador de filas (como `Sample Number`) y también es un identificador, se llame como se
-  llame; un conteo real como `units_sold` puede cubrir todos los valores del 1 al 99, pero no en
-  ese orden.
-- **constant**: Un solo valor único
-
-Estos tipos pueden sobreescribirse por columna mediante `column_types` en la configuración (ver
-la sección de YAML más arriba); las columnas en `ignore` se excluyen de absolutamente todo el
-análisis (calidad, univariado, relaciones, outliers, target, visualizaciones, tablas).
-
-### Formatos de Entrada Soportados
-
-| Extensión | Notas |
+| Section | What you get |
 |---|---|
-| `.csv`, `.tsv`, `.txt` | Delimitador, codificación y separador decimal auto-detectados si no se especifican |
-| `.xlsx`, `.xls` | Primera hoja por defecto; `--sheet` acepta nombre o índice (un valor numérico se interpreta como índice) |
-| `.parquet` | Sin opciones adicionales |
-| `.json` | Un objeto, o un arreglo de registros (incluso anidados: se aplanan con notación `campo.subcampo`); si no es JSON válido se reintenta como JSON Lines |
-| `.jsonl` | Siempre JSON Lines (un registro por línea) |
+| Data quality | Missing values, duplicates, constant and quasi-constant columns, high cardinality, mixed types, numbers stored as text |
+| Type inference | Each column classified as continuous, discrete, categorical, boolean, datetime, time of day, text, identifier or constant — this is what decides the analysis it receives |
+| Univariate | Descriptive statistics, normality tests, frequency tables, histograms and boxplots |
+| Outliers | IQR, MAD z-score and a multivariate Isolation Forest whose cut is drawn from each dataset's own anomaly scores |
+| Relationships | Pearson, Cramér's V, correlation ratio, VIF, two heatmaps, scatter plots of the strongest pairs and a pair plot coloured by group |
+| Target analysis | Class balance, leakage checks, and the features most related to the target on one 0-to-1 scale |
+| Preprocessing plan | What to convert, drop, impute, encode and scale — every line with the measurement behind it |
 
-Cualquier celda que contenga una lista o diccionario (común en JSON anidado) se serializa como
-texto JSON en vez de hacer fallar los pasos posteriores del análisis.
+## Rules you can check
 
-### Alertas de Calidad
+Automatic advice is easy to write and hard to trust. Two things keep this one honest.
 
-El sistema genera alertas (alta, media, baja) para:
+**Every threshold was measured before it was written.** Not chosen by convention — measured across
+the 24 datasets in `data/raw` (92 distinct numeric columns, 89 categorical ones), and the code
+comments say what the measurement showed. For example, a column is drawn on a log scale when the
+middle 90% of its rows takes less than 30% of the axis, the log at least doubles that span, and at
+most 5% of its values are 0 or negative. Two simpler candidates were measured first and rejected:
+skewness picks columns that already read well, and a p99/p1 ratio picks columns the log does not
+help.
 
-- >95% valores faltantes por columna (`missing_threshold`)
-- Celdas que solo contienen signos (`.`, `-`, `?`, `_`, `*`, `/`): se toman como valores faltantes antes
-  de analizar, y cada columna afectada recibe una alerta con los marcadores y cuántas veces aparecen
-  (también en `summary.json → data_quality.missing_placeholders`). Si una columna de texto queda
-  solo con números, pasa a ser numérica.
-- Duplicados exactos: la severidad depende de `duplicate_threshold` (por encima del umbral → alta;
-  por encima de la mitad del umbral → media; el resto → baja)
-- Columnas constantes/quasi-constantes (`constant_threshold`)
-- Alta cardinalidad (`cardinality_threshold`), solo en columnas categóricas, de texto o
-  identificadores: los números y las fechas tienen muchos valores distintos por naturaleza
-- Tipos mixtos en columnas
-- Números almacenados como texto
-- Desbalance de clases en el target (ver más abajo)
-- Posibles fugas de datos (target)
-- Columna target inexistente (solo en modo batch; en `analyze-file` este caso aborta el archivo)
+**Every recommendation shows its evidence.** The plan never says "impute with the median" alone —
+this is one row of it, as the report prints it:
 
-Las alertas de target (desbalance, fugas) aparecen tanto en la sección «Alertas y
-Recomendaciones» del HTML como en `summary.json → alerts`, junto con las de calidad de datos.
-
-### Proporciones categóricas (pie charts)
-
-Debajo de «Distribuciones Categóricas», el reporte muestra un pie chart por cada columna categórica
-con **hasta 6 categorías**, con el porcentaje de cada una sobre las filas que tienen valor. Las
-porciones de al menos el 5 % llevan su porcentaje escrito dentro; la leyenda lista todas las
-categorías con su porcentaje y su número de filas, incluidas las más pequeñas (una porción menor al
-0.1 % se muestra como `<0.1 %`). Las columnas con más de 6 categorías solo tienen el gráfico de
-barras: con 10 porciones de tamaño parecido (por ejemplo, `año` en los datos de México) un pie ya
-no se puede leer.
-
-### Outliers
-
-Detectados por:
-
-- **IQR**: límites `[Q1 - 1.5×IQR, Q3 + 1.5×IQR]`
-- **MAD**: z-score robusto `|x - mediana| / MAD > 3.0`
-- **Isolation Forest**: Anomalías multivariadas. Cada fila recibe una puntuación de anomalía, y se
-  marcan las que superan `Q3 + 1.5×IQR` de las puntuaciones de ese mismo dataset (el mismo
-  `iqr_multiplier` que usa el IQR). El porcentaje marcado cambia con los datos: en los datasets de
-  ejemplo va del 0.3 % al 12 %. Antes se marcaba siempre el 10 % de las filas. Con
-  `isolation_forest_contamination` se puede volver a fijar un porcentaje. No se aplica con menos de
-  30 filas completas, y el reporte y `outlier_summary.csv` indican el corte usado.
-
-Cuando al menos la mitad de una columna tiene el mismo valor (por ejemplo, un descuento que es 0 en el 77 %
-de las ventas), el IQR y el MAD valen 0: el rango "normal" se reduce a ese único valor y cualquier otro
-saldría como atípico. En ese caso el método no se aplica a la columna; `tables/outlier_summary.csv` lo
-explica en la columna `nota` y el reporte lista las columnas sin IQR.
-
-Un escalón más abajo está el caso en que **un solo valor se queda con un cuartil**: en los datos de
-Spaceship Titanic, `RoomService` vale 0 en el 65 % de las filas, así que Q1 = 0, el límite quedaba en
-2.5×Q3 y el IQR marcaba una quinta parte de la columna (entre las seis numéricas, 5 030 de las 8 693
-filas). Cuando el valor más repetido ocupa al menos el 25 % de las filas y coincide con Q1 o Q3, el
-rango normal se mide sobre las filas que tienen otro valor, y la columna `nota` lo dice. Sobre las 111
-columnas numéricas de `data/raw`, 24 tienen un cuartil pegado y solo 9 marcaban más del 1 %: esas pasan
-del 14-22 % al 2-10 %, y ninguna otra columna cambia.
-
-### Relaciones
-
-- **Numeric ↔ Numeric**: Correlación Pearson (con p-value)
-- **Categorical ↔ Categorical**: Cramér's V (sesgada-corregida)
-- **Categorical ↔ Numeric**: Correlation ratio (eta)
-- **Multicolinealidad**: VIF (Variance Inflation Factor)
-- **Gráficos de dispersión**: los `max_scatter_pairs` pares numéricos con mayor correlación en valor
-  absoluto (|r|), del más fuerte al más débil, con su r en el título
-- **Escala logarítmica**: una columna numérica continua se dibuja además en escala logarítmica cuando
-  se cumplen tres condiciones a la vez: el 90 % central de sus filas ocupa menos del 30 % del eje, el
-  logaritmo al menos duplica ese espacio y como mucho el 5 % de sus valores son 0 o negativos. La
-  versión logarítmica nunca reemplaza a la lineal: en histogramas, boxplots y gráficos de dispersión va
-  a la derecha de la lineal, en la misma imagen; el pair plot se repite debajo con log10 en esas columnas.
-  Los puntos con valor 0 o negativo quedan fuera del panel logarítmico y se indica cuántos. La medición
-  de cada columna elegida queda en `summary.json → log_scale_columns`.
-- **Columnas llenas de su valor más bajo**: cuando un mismo valor ocupa el fondo de la columna, aplasta
-  todo lo demás, y si ese valor es 0 la escala logarítmica no puede arreglarlo (la regla D la descarta
-  justamente porque dejaría fuera la mayoría de las filas). En ese caso el histograma y el boxplot se
-  dibujan dos veces en la misma imagen: la columna completa a la izquierda y lo que queda sin ese valor
-  a la derecha, con escala logarítmica si lo que queda la pide. Se hace cuando se cumplen tres cosas:
-  el valor más bajo se repite en al menos el 25 % de las filas, lo que queda tiene más de 20 valores
-  distintos (por debajo de eso son niveles, no una distribución) y el gráfico completo está aplastado
-  según la misma medición de la regla D. Sobre los 24 datasets elige 8 columnas: las cinco de gasto de
-  Spaceship Titanic (62-66 % en 0), `prima_cedida`, `monto_recuperado_reaseguro` y `waste_pct`. Queda
-  en `summary.json → floor_split_columns`.
-- **Pair plot**: debajo de los gráficos de dispersión, un pair plot con las columnas numéricas continuas
-  (hace falta al menos 3; si hay más de 6, las 6 con correlaciones más fuertes). Cada panel cruza dos
-  variables y la diagonal muestra la distribución de cada una. Se colorea por grupo cuando hay uno que
-  sirva: el target, si es de clasificación; si no, la variable categórica de 2 a 6 grupos que más separa
-  esas columnas, siempre que llegue a un η medio de 0.25 (efecto mediano). Cada grupo necesita al menos
-  10 filas, y en la diagonal cada grupo se normaliza por separado para comparar formas aunque sea
-  pequeño. Con más de 2 000 filas completas se usa una muestra aleatoria fija. El reporte y
-  `summary.json → pair_plot` dicen qué columnas, qué grupo y por qué.
-
-El reporte incluye dos mapas de calor:
-
-- **Matriz de Correlación**: Pearson, solo entre columnas numéricas (de -1 a 1, con signo).
-- **Asociación entre Variables**: cubre también las categóricas. Cada celda usa la medida que
-  corresponde al par (Pearson, Cramér's V o eta) en vez de convertir las categorías a números.
-  Codificarlas como 0, 1, 2… inventa un orden que no existe: en el dataset de stroke ese atajo
-  convierte la asociación entre `work_type` y `age` (eta 0.68) en un engañoso -0.36.
-
-### Target Analysis
-
-Para columnas target:
-
-- **Auto-detección**: Clasificación si ≤20 valores únicos; regresión si >20 numéricos
-- **Balance de clases**: se marca **desbalanceado** cuando la clase mayoritaria representa más de
-  `class_imbalance_threshold` del total (por defecto 0.8, es decir, más del 80%) —
-  independientemente de cuántas clases haya
-- **Features más relacionadas con el target**: la prueba depende del tipo de target, no de cómo esté
-  guardado. Con un target de clasificación, chi-cuadrado para las categóricas y Kruskal-Wallis para
-  las numéricas; con uno de regresión, información mutua. La columna «Efecto» es siempre una medida
-  de asociación de 0 a 1 —Cramér's V entre categóricas, razón de correlación (eta) entre una
-  categórica y una numérica—, las mismas del mapa de asociación, así que se pueden comparar entre
-  sí. La tabla se ordena por ese efecto: con miles de filas todos los p-value se van a 0 y dejan de
-  ordenar nada. Los identificadores, el texto libre, las fechas y las horas no entran: un
-  chi-cuadrado sobre miles de categorías mide unicidad, no relación (`PassengerId` encabezaba la
-  tabla del Spaceship Titanic con un efecto de 1.000).
-- **Leakage**: Correlaciones sospechosamente altas (>0.99) o asociaciones categóricas casi perfectas
-- **Columna inexistente**: en `analyze-file` el comando falla con un mensaje en español (columnas
-  disponibles + sugerencia); en `analyze-batch` se registra una advertencia y el análisis de ese
-  archivo continúa sin target
-
-Con un target de clasificación, el reporte agrega la sección «Target vs Variables Categóricas»
-debajo de «Distribuciones Categóricas»: un gráfico de barras agrupadas por cada variable
-categórica, con el porcentaje sobre el total encima de cada barra. Se omiten los targets de
-regresión y los de más de 12 clases, donde el gráfico deja de leerse; las categorías más allá de
-las 9 más frecuentes se agrupan en «Otros».
-
-### Plan de preprocesamiento
-
-El reporte termina con un plan en cinco pasos, en el orden en que se aplican, y cada línea lleva al
-lado la medición que la produjo, para poder comprobarla en vez de creerla. También queda en
-`summary.json → recommendations` y en `tables/recommendations.csv`.
-
-**Solo está aquí lo que los datos deciden por sí solos.** Quedan fuera dos cosas que no se pueden
-leer de la tabla: si una variable categórica es *ordinal* y en qué orden van sus niveles (sobre las
-89 columnas categóricas de `data/raw` una regla automática no acierta el orden de ninguna), y si el
-modelo necesita escalado (un árbol no; una distancia o una penalización sí). El plan dice que las
-magnitudes son incomparables —eso es un hecho medido— y deja la decisión del escalado al lector.
-
-1. **Convertir**: columnas cuyos valores son números guardados como texto (las que ya detecta la
-   alerta de calidad). Mientras sigan así se analizan como categorías, así que esperan a los demás
-   pasos en vez de recibir consejos que suponen que son categorías: `amazon.rating` guarda 1 464
-   números leídos como 28 categorías.
-2. **Descartar**: filas repetidas, filas sin target, columnas con un solo valor o casi, columnas a
-   las que les falta más del 60 % de los valores, identificadores, y pares de columnas con |r| ≥ 0.95
-   (de los cuales se conserva una, cuál es decisión suya).
-3. **Imputar**: la mediana en las numéricas, diciendo si la media queda desplazada por la cola o si
-   ambas dan el mismo valor (menos de 0.10 desviaciones de diferencia, donde la elección da igual).
-   En las categóricas, la moda si falta un 5 % o menos, y una categoría explícita «Desconocido» si
-   falta más: imputar con la moda le daría a un valor un peso que no tiene.
-4. **Codificar**: una sola columna 0/1 con dos categorías; one-hot hasta 15 categorías, siempre que
-   la tabla tenga al menos 20 filas por columna nueva (tres categorías se admiten siempre); si alguna
-   categoría no llega al 1 % de las filas, agruparlas en «Otros» antes. Por encima de eso, el plan
-   desaconseja el one-hot y sugiere agrupar o codificar por frecuencia.
-5. **Escalar**: primero si hace falta, comparando la desviación mayor con la menor (a partir de 10
-   veces); después qué escalador conviene a cada columna: `log10` antes de escalar si ya se dibuja en
-   escala logarítmica, `RobustScaler` cuando su desviación estándar es más del doble de su rango
-   intercuartil (la cola arrastra la media), y `StandardScaler` en el resto.
-
-Cada umbral se fijó midiendo los 24 datasets de `data/raw` antes de escribir la regla; el porqué de
-cada uno está comentado en `src/eda_pipeline/recommendations.py`.
-
-### Manejo de errores por paso
-
-Cada paso del análisis (calidad, univariado, relaciones, outliers, target, visualizaciones,
-tablas CSV, reporte HTML) se ejecuta de forma aislada: si uno falla, se registra el traceback
-junto con el ID de correlación de la ejecución, el paso se agrega a `failed_steps`, se muestra en
-una sección «Pasos con Error» del HTML, y el resto del análisis continúa con valores por defecto
-seguros. Con `--strict`, cualquier error (de un dataset o de un paso) detiene la ejecución de
-inmediato.
-
-### Códigos de salida
-
-| Código | Significado |
-|---|---|
-| 0 | Todo se procesó correctamente (sin errores de dataset ni de pasos) |
-| 1 | Al menos un dataset, o al menos un paso de un dataset, falló |
-| 2 | Error de uso o de configuración (ruta inexistente, clave de configuración desconocida, valor fuera de rango) |
-
-## Testing
-
-```powershell
-# Todos los tests
-.\.venv\Scripts\python.exe -m pytest tests/ -v
-
-# Con coverage
-.\.venv\Scripts\python.exe -m pytest tests/ --cov=eda_pipeline --cov-report=term-missing
-
-# Tests específicos
-.\.venv\Scripts\python.exe -m pytest tests/test_modules.py -v
-.\.venv\Scripts\python.exe -m pytest tests/test_integration.py -v
-.\.venv\Scripts\python.exe -m pytest tests/test_cli.py -v
+```text
+Age    Imputar con la mediana (27.00)
+       Falta el 2.1%. La media (28.83) queda desplazada 0.13 desviaciones
+       respecto a la mediana, arrastrada por la cola
 ```
 
-## Linting y Formateo
+2.1% of `Age` is missing, and the mean sits 0.13 standard deviations away from the median because the
+tail pulls it, so the median is the value to fill with. You can check that claim without trusting it.
 
-```powershell
-# Verificar
-.\.venv\Scripts\python.exe -m ruff check .
+And the plan states what it will not decide: whether a categorical column is *ordinal* (over the 89
+categorical columns of the corpus, an automatic rule gets the order right on none of them) and
+whether your model needs scaling at all. It reports the measured fact — these spreads are
+incomparable — and leaves that call to you.
 
-# Formatear
-.\.venv\Scripts\python.exe -m ruff format .
+## Built with AI, verified like production code
 
-# Verificar formato sin modificar
-.\.venv\Scripts\python.exe -m ruff format --check .
+The whole pipeline was written and is maintained with [Claude Code](https://claude.com/claude-code),
+under a workflow that treats AI output as a proposal to be checked, never as a result. Every change
+arrives as a pull request that states what was measured, what the rule picks and what it leaves out;
+a human reviews and merges it:
+
+- **Measure first.** No rule ships before it is run over the 24 real datasets and the output read
+  against the raw CSVs. Reading that output is what catches the mistakes: it is how the preprocessing
+  plan stopped offering to one-hot-encode a rating that was really 1 464 numbers stored as text.
+- **Tests before code.** Every rule has tests that were seen failing first — 315 of them, 0 failures,
+  no warnings, 92% coverage, `ruff` clean.
+- **One change per pull request.** 38 merged PRs, each with what was measured, what it picks and
+  what it deliberately leaves out.
+- **Independent verification.** 50 defects have been found and fixed this way, including in work the
+  AI itself produced: an agent once reported "ruff 100% clean" when it was not, and reading a
+  generated report found an identifier topping the feature-importance table with a perfect score.
+
+That last part is the point: an EDA tool that quietly reports 58% of your rows as outliers is worse
+than no tool. It did, once — `RoomService` is 0 on 65.5% of its rows, so a quartile sat on that 0 and
+the IQR fence measured the zeros instead of the spread. Nothing crashed and every number in the
+report matched the raw file; it took reading the report line by line against the data to see it.
+
+## Project layout
+
+```
+src/eda_pipeline/       loading · type inference · data quality · univariate · outliers ·
+                        relationships · target · recommendations · charts · HTML report
+tests/                  315 tests, unit and integration, 92% coverage
+config/default.yaml     every threshold, overridable per run
+data/raw/               the datasets the rules were measured on (not tracked)
+IMPLEMENTATION_PLAN.md  27 stages, each with its measurements and what was verified
 ```
 
-## Notebook de ejemplo
+Each analysis step runs in isolation: if one fails, its traceback is logged with the run's
+correlation id, the step is listed in `summary.json → failed_steps` and the report is still produced.
 
-`notebooks/01_eda_template.ipynb` ejecuta el pipeline a través de su API de Python (sin CLI) sobre
-`data/raw/ecommerce.csv` y muestra un resumen de los resultados (tipos de columnas, alertas,
-balance de clases). Requiere `jupyter`/`nbconvert` además de las dependencias del proyecto.
+## Notes and roadmap
 
-## Generación de Datos de Prueba
+- **The report text is Spanish today** (the CLI messages too). The English pass has started with this
+  README; the report is next.
+- Reports are self-contained, so they get large on very wide datasets (>100 columns). Chart counts
+  are configurable.
+- Next: generated scikit-learn preprocessing code, ordinal levels declared in the config, missingness
+  that carries signal, text analysis (TF-IDF, topic modelling), and schema validation.
 
-`scripts/generate_sample_data.py` genera datasets sintéticos (e-commerce, salud, ventas) en
-varios formatos dentro de `data/raw/`:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/generate_sample_data.py
-```
-
-## Estructura del Proyecto
-
-```
-D:\DataScience\Pipeline/
-├── src/eda_pipeline/              # Paquete principal
-│   ├── __init__.py
-│   ├── __main__.py                # Punto de entrada CLI
-│   ├── cli.py                     # Comandos CLI
-│   ├── config.py                  # Sistema de configuración
-│   ├── logging_util.py            # Logging estructurado
-│   ├── data_loader.py             # Carga de datos
-│   ├── type_inference.py          # Inferencia de tipos
-│   ├── data_quality.py            # Análisis de calidad
-│   ├── univariate_analysis.py     # Estadísticas univariadas
-│   ├── outlier_detection.py       # Detección de outliers
-│   ├── relationships.py           # Análisis de relaciones
-│   ├── target_analysis.py         # Análisis de target
-│   ├── visualizations.py          # Generación de gráficos
-│   ├── html_report.py             # Generación de reportes HTML
-│   ├── tables.py                  # Exportación de tablas CSV
-│   └── pipeline.py                # Orquestador principal
-│
-├── tests/                         # Suite de tests
-│   ├── conftest.py                # Fixtures pytest
-│   ├── test_modules.py            # Tests unitarios
-│   ├── test_integration.py        # Tests de integración (pipeline completo)
-│   └── test_cli.py                # Tests de CLI (click.testing.CliRunner)
-│
-├── config/                        # Configuración
-│   └── default.yaml               # Config por defecto (generado con `init-config`)
-│
-├── notebooks/                     # Notebooks Jupyter
-│   └── 01_eda_template.ipynb      # Ejemplo de uso vía la API de Python
-│
-├── data/                          # Datos
-│   ├── raw/                       # Datos crudos
-│   ├── interim/                   # Datos intermedios
-│   ├── processed/                 # Datos procesados
-│   ├── external/                  # Datos externos
-│   └── .gitkeep
-│
-├── reports/                       # Reportes generados
-│   └── .gitkeep
-│
-├── logs/                          # Logs de ejecución
-│   └── .gitkeep
-│
-├── scripts/                       # Scripts auxiliares
-│   └── generate_sample_data.py
-│
-├── pyproject.toml                 # Configuración del proyecto (build, ruff, pytest)
-├── requirements.txt               # Dependencias (versiones compatibles)
-├── requirements-dev.txt           # Dependencias de desarrollo
-├── .gitignore                     # Git ignore
-├── README.md                      # Este archivo
-└── IMPLEMENTATION_PLAN.md         # Plan de implementación (fases)
-```
-
-### Datos y control de versiones
-
-Git no versiona ningún archivo dentro de `data/`, solo la estructura de carpetas (con `.gitkeep`),
-porque los datasets pueden contener información privada.
-
-**Guarda siempre tus datasets dentro de `data/`.** Fuera de esa carpeta los CSV, Excel, Parquet o
-JSON ya no se ignoran, para que los tests puedan incluir archivos de ejemplo.
-
-Los reportes (`reports/`) y los logs (`logs/`) tampoco se versionan.
-
-## Extensión del Pipeline
-
-### Agregar un nuevo análisis
-
-1. Crear módulo `src/eda_pipeline/mi_analisis.py`:
-
-```python
-from dataclasses import dataclass
-
-
-@dataclass
-class MiResultado:
-    metrica1: float
-    metrica2: int
-
-
-def analizar_mi_cosa(df: pd.DataFrame) -> MiResultado:
-    # Tu lógica
-    return MiResultado(...)
-```
-
-2. Integrar en `pipeline.py`:
-
-```python
-from .mi_analisis import analizar_mi_cosa
-
-# En EDAPipeline._analyze_dataset(), envuelto con self._run_step(...) para aislar errores:
-mi_resultado = self._run_step("mi_analisis", failed_steps, analizar_mi_cosa, df, default=None)
-```
-
-3. Agregar tests en `tests/test_modules.py`
-4. Actualizar reporte HTML si es necesario
-
-### Agregar un nuevo formato de entrada
-
-Editar `data_loader.py`:
-
-```python
-def load_mi_formato(file_path: Path, **kwargs) -> pd.DataFrame:
-    # Cargar datos
-    return df
-
-# En detect_file_format() agregar:
-elif suffix == ".miext":
-    return "mi_formato"
-
-# En load_data() agregar:
-elif file_format == "mi_formato":
-    df = load_mi_formato(file_path, **kwargs)
-```
-
-## Troubleshooting
-
-### Error: "No module named 'eda_pipeline'"
-
-```powershell
-# Instalar en modo editable
-.\.venv\Scripts\python.exe -m pip install -e .
-```
-
-### Error: "Encoding mismatch"
-
-```powershell
-# Especificar encoding manualmente si la auto-detección falla
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-file archivo.csv --encoding cp1252
-```
-
-### Error: "La columna target '...' no existe en el dataset"
-
-```powershell
-# El mensaje ya lista las columnas disponibles y una sugerencia si el nombre es parecido.
-# Verifique el nombre exacto de la columna (sensible a mayúsculas/minúsculas).
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-file data.csv --target nombre_exacto_columna
-```
-
-### Reportes vacíos o incompletos
-
-```powershell
-# Ejecutar en modo verbose para ver detalles (nivel DEBUG)
-.\.venv\Scripts\python.exe -m eda_pipeline analyze-file data.csv --verbose
-# Ver logs en logs/ (hermana de --output-dir, no dentro de la carpeta del reporte)
-# El summary.json de cada reporte incluye "failed_steps" si algún paso falló
-```
-
-### Acentos o símbolos raros al redirigir la salida (`> salida.txt`, `| Select-String ...`)
-
-En Windows con página de códigos cp1252, al redirigir la salida los acentos pueden verse como `�`
-y ✅/❌ como `?`. El comando no falla y los reportes no se ven afectados. Para que se vean bien,
-activa el modo UTF-8 de Python en esa sesión de PowerShell antes de ejecutar:
-
-```powershell
-$env:PYTHONUTF8 = "1"
-```
-
-## Limitaciones conocidas y trabajo futuro
-
-### Limitaciones Actuales
-
-- Los reportes HTML se generan sin caché (grandes para datasets muy amplios >100 columnas, o con
-  muchas visualizaciones habilitadas)
-- Visualizaciones limitadas a 20-30 gráficos por tipo (configurable vía `visualizations`)
-- Sin análisis de texto avanzado (TF-IDF, topic modeling)
-- Sin validación de datos (schema/constraints)
-
-### Mejoras Planificadas
-
-- [ ] Exportar a Power BI / Tableau templates
-- [ ] Validación de datos con Great Expectations
-- [ ] Análisis de series temporales (decomposition, autocorrelation)
-- [ ] Análisis de texto (word clouds, TF-IDF, NLP)
-- [ ] Recomendaciones automáticas de preprocesamiento
-- [ ] Integración con MLflow para tracking
-- [ ] API REST para uso remoto
-- [ ] Dashboard interactivo (Dash/Streamlit)
-- [ ] Soporte para bases de datos (SQL)
-
-## Contribuciones
-
-Las contribuciones son bienvenidas. Por favor:
-
-1. Clonar el repo
-2. Crear rama feature (`git checkout -b feature/nueva_feature`)
-3. Hacer cambios + tests
-4. Verificar: tests, lint, coverage
-5. Commit (`git commit -m "feat: descripción"`)
-6. Push y pull request
-
-## Licencia
+## License
 
 MIT
-
-## Autor
-
-Generado con Claude Code – Análisis Exploratorio de Datos automatizado.
