@@ -29,20 +29,20 @@ SemanticType = Literal[
 
 # Spanish labels for the inferred types, shown per column in the HTML report and the CSV tables.
 SEMANTIC_TYPE_LABELS: dict[str, str] = {
-    "numeric_continuous": "Numérica continua",
-    "numeric_discrete": "Numérica discreta",
-    "categorical": "Categórica",
-    "boolean": "Booleana",
-    "datetime": "Fecha/hora",
-    "time": "Hora del día",
-    "text": "Texto libre",
-    "identifier": "Identificador",
-    "constant": "Constante",
+    "numeric_continuous": "Continuous",
+    "numeric_discrete": "Discrete",
+    "categorical": "Categorical",
+    "boolean": "Boolean",
+    "datetime": "Date/time",
+    "time": "Time of day",
+    "text": "Free text",
+    "identifier": "Identifier",
+    "constant": "Constant",
 }
 
 
 def semantic_type_label(semantic_type: str | None) -> str:
-    """Spanish label for an inferred type; an unknown or missing type is shown as a dash."""
+    """Report label for an inferred type; an unknown or missing type is shown as a dash."""
     if not semantic_type:
         return "—"
     return SEMANTIC_TYPE_LABELS.get(semantic_type, semantic_type)
@@ -50,20 +50,20 @@ def semantic_type_label(semantic_type: str | None) -> str:
 
 # Short names for the storage dtypes pandas reports. The loader reads with the nullable backend,
 # so a column of whole numbers arrives as "Int64" and one of text as "string"; the report shows
-# "int" and "texto" and keeps the exact dtype alongside.
+# "int" and "text" and keeps the exact dtype alongside.
 _DTYPE_LABEL_PREFIXES: tuple[tuple[str, str], ...] = (
     ("int", "int"),
     ("uint", "int"),
     ("float", "float"),
-    ("complex", "complejo"),
+    ("complex", "complex"),
     ("bool", "bool"),
-    ("datetime", "fecha"),
-    ("timedelta", "duración"),
-    ("period", "periodo"),
-    ("category", "categoría"),
-    ("string", "texto"),
-    ("str", "texto"),
-    ("object", "texto"),
+    ("datetime", "date"),
+    ("timedelta", "duration"),
+    ("period", "period"),
+    ("category", "category"),
+    ("string", "text"),
+    ("str", "text"),
+    ("object", "text"),
 )
 
 
@@ -465,9 +465,7 @@ def apply_column_type_overrides(
         n_failed = int(df[col].isna().sum()) - before_na
         if n_failed > 0:
             result.coercion_failures[col] = n_failed
-            logger.warning(
-                f"Columna '{col}': {n_failed} valor(es) no se pudieron convertir a numérico (quedaron como NaN)."
-            )
+            logger.warning(f"Column '{col}': {n_failed} value(s) could not be converted to a number (they stayed NaN).")
         types[col] = "numeric_continuous"
 
     for col in _known(overrides.datetime):

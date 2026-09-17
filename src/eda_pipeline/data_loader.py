@@ -416,7 +416,7 @@ def discover_batch_files(folder_path: Path, pattern: Optional[str] = None) -> li
             logger.info(f"Omitiendo archivo oculto: {path.name}")
             continue
         if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            logger.info(f"Omitiendo archivo con extensión no soportada: {path.name}")
+            logger.info(f"Skipping file with an unsupported extension: {path.name}")
             continue
         files.append(path)
 

@@ -715,7 +715,7 @@ class TestDataQuality:
         )
         report = analyze_data_quality(df, cardinality_threshold=100)
         assert set(report.high_cardinality_columns) == {"municipio"}
-        assert [a.column for a in report.alerts if "alta cardinalidad" in a.message] == ["municipio"]
+        assert [a.column for a in report.alerts if "high cardinality" in a.message] == ["municipio"]
 
     def test_high_cardinality_ignores_identifier_columns(self):
         # An ID holds one value per entity by definition, so "too many distinct values" is not a
@@ -730,7 +730,7 @@ class TestDataQuality:
         column_types = {"customer_id": "identifier", "municipio": "categorical"}
         report = analyze_data_quality(df, cardinality_threshold=100, column_types=column_types)
         assert set(report.high_cardinality_columns) == {"municipio"}
-        assert [a.column for a in report.alerts if "alta cardinalidad" in a.message] == ["municipio"]
+        assert [a.column for a in report.alerts if "high cardinality" in a.message] == ["municipio"]
 
     def test_high_cardinality_ignores_time_of_day_columns(self):
         # A time of day takes thousands of values by nature, like an amount or a date.
@@ -1010,7 +1010,7 @@ class TestDatesOverTime:
 
         dates = pd.Series(pd.to_datetime(["2023-01-01", "2023-01-01", "2023-01-03", "2023-01-17"]))
         counts, period = rows_per_period(dates)
-        assert period == "día"
+        assert period == "day"
         assert len(counts) == 17  # every day of the span, the empty ones included
         assert counts.iloc[0] == 2
         assert counts.iloc[1] == 0
@@ -1021,12 +1021,12 @@ class TestDatesOverTime:
 
         year = pd.Series(pd.date_range("2024-01-01", "2024-12-31", freq="D"))
         counts, period = rows_per_period(year)
-        assert period == "semana"
+        assert period == "week"
         assert counts.sum() == len(year)
 
         years = pd.Series(pd.date_range("2019-01-01", "2024-05-31", freq="D"))
         counts, period = rows_per_period(years)
-        assert period == "mes"
+        assert period == "month"
         assert len(counts) == 65
 
     def test_the_time_series_plot_is_written_for_text_dates(self, tmp_output_dir):
@@ -1159,7 +1159,7 @@ class TestIsolationForest:
         df, _ = self._with_planted_anomalies(n=ISOLATION_FOREST_MIN_ROWS - 1, n_anomalies=1)
         results, note = detect_outliers_isolation_forest(df, ["a", "b", "c"])
         assert results == []
-        assert "No aplicado" in note
+        assert "Not applied" in note
 
 
 class TestRelationships:
@@ -1567,7 +1567,7 @@ class TestHtmlReport:
             "column": "quantity",
             "dtype": "int",
             "dtype_raw": "Int64",
-            "type_label": "Numérica discreta",
+            "type_label": "Discrete",
             "missing_pct": 0.0,
         }
 
@@ -1577,8 +1577,8 @@ class TestHtmlReport:
             column_types={"customer_id": "identifier"},
             column_dtypes={"customer_id": "string"},
         )
-        assert rows[0]["type_label"] == "Identificador"
-        assert rows[0]["dtype"] == "texto"
+        assert rows[0]["type_label"] == "Identifier"
+        assert rows[0]["dtype"] == "text"
 
     def test_column_quality_rows_without_types_are_still_written(self):
         # The type maps are optional arguments of generate_html_report.
@@ -1717,7 +1717,7 @@ class TestTargetCategoricalBars:
         )
         counts = target_vs_categorical_counts(df["grupo"], df["target"], max_categories=3)
         assert len(counts.columns) == 4
-        assert counts.columns[-1] == "Otros"
+        assert counts.columns[-1] == "Other"
         assert counts.to_numpy().sum() == 240  # grouping never loses rows
 
     def test_numeric_target_classes_are_ordered_as_numbers(self):
@@ -1826,7 +1826,7 @@ class TestPreprocessingRecommendations:
         rec = self._rows(plan, column="rating")
         assert len(rec) == 1
         assert rec[0].step == STEP_CONVERT
-        assert "300 de sus 300 valores" in rec[0].evidence
+        assert "300 of its 300 values" in rec[0].evidence
         assert plan[0].step == STEP_CONVERT  # nothing else can be decided until it is a number
 
     # --- descartar -------------------------------------------------------------------------
@@ -1855,7 +1855,7 @@ class TestPreprocessingRecommendations:
 
         rec = self._rows(plan, step=STEP_DROP, column="cliente_id")
         assert len(rec) == 1
-        assert "300 valores distintos" in rec[0].evidence
+        assert "300 distinct" in rec[0].evidence
 
     def test_repeated_rows_are_reported_for_the_whole_table(self):
         from eda_pipeline.recommendations import STEP_DROP
@@ -1866,7 +1866,7 @@ class TestPreprocessingRecommendations:
 
         rec = [r for r in self._rows(plan, step=STEP_DROP) if r.column is None]
         assert len(rec) == 1
-        assert "10 de 110 filas" in rec[0].evidence
+        assert "10 of the 110 rows" in rec[0].evidence
 
     def test_two_columns_that_say_the_same_thing_keep_only_one(self):
         # credito_asegurado: monto_credito ~ saldo_principal, r = 0.995.
@@ -1900,8 +1900,8 @@ class TestPreprocessingRecommendations:
 
         rec = self._rows(plan, step=STEP_IMPUTE, column="monto")
         assert len(rec) == 1
-        assert "mediana" in rec[0].action.lower()
-        assert "desplazada" in rec[0].evidence
+        assert "median" in rec[0].action.lower()
+        assert "pulled by the tail" in rec[0].evidence
 
     def test_a_symmetric_column_says_both_averages_agree(self):
         from eda_pipeline.recommendations import MEAN_MEDIAN_GAP, STEP_IMPUTE
@@ -1912,7 +1912,7 @@ class TestPreprocessingRecommendations:
 
         rec = self._rows(plan, step=STEP_IMPUTE, column="medida")
         assert len(rec) == 1
-        assert "coinciden" in rec[0].evidence
+        assert "agree within" in rec[0].evidence
         assert f"{MEAN_MEDIAN_GAP:.2f}" in rec[0].evidence
 
     def test_a_category_with_few_gaps_is_filled_with_the_most_common_value(self):
@@ -1924,7 +1924,7 @@ class TestPreprocessingRecommendations:
 
         rec = self._rows(plan, step=STEP_IMPUTE, column="grupo")
         assert len(rec) == 1
-        assert "moda" in rec[0].action.lower()
+        assert "most common value" in rec[0].action.lower()
 
     def test_a_category_with_many_gaps_gets_its_own_unknown_value(self):
         from eda_pipeline.recommendations import STEP_IMPUTE
@@ -1935,7 +1935,7 @@ class TestPreprocessingRecommendations:
 
         rec = self._rows(plan, step=STEP_IMPUTE, column="grupo")
         assert len(rec) == 1
-        assert "Desconocido" in rec[0].action
+        assert "'Unknown'" in rec[0].action
 
     def test_a_column_without_gaps_is_not_imputed(self):
         from eda_pipeline.recommendations import STEP_IMPUTE
@@ -1962,7 +1962,7 @@ class TestPreprocessingRecommendations:
         rec = self._rows(plan, step=STEP_ENCODE, column="grupo")
         assert len(rec) == 1
         assert "one-hot" in rec[0].action.lower()
-        assert "3 categorías" in rec[0].evidence
+        assert "3 categories" in rec[0].evidence
 
     def test_too_many_categories_rule_one_hot_out(self):
         # clientes.tipo_empleo: 21 categories. credito_asegurado.clave_administrador: 36.
@@ -1973,8 +1973,8 @@ class TestPreprocessingRecommendations:
 
         rec = self._rows(plan, step=STEP_ENCODE, column="sector")
         assert len(rec) == 1
-        assert rec[0].action.startswith("Evitar one-hot")
-        assert f"{n_cats} categorías" in rec[0].evidence
+        assert rec[0].action.startswith("Avoid one-hot")
+        assert f"{n_cats} categories" in rec[0].evidence
 
     def test_one_hot_is_ruled_out_when_it_would_add_a_column_per_few_rows(self):
         # Vistara Products.color: 14 categories over 40 rows.
@@ -1985,8 +1985,8 @@ class TestPreprocessingRecommendations:
 
         rec = self._rows(plan, step=STEP_ENCODE, column="color")
         assert len(rec) == 1
-        assert rec[0].action.startswith("Evitar one-hot")
-        assert "40 filas" in rec[0].evidence
+        assert rec[0].action.startswith("Avoid one-hot")
+        assert "40 rows" in rec[0].evidence
         # Three categories over the same 40 rows are still fine.
         assert "one-hot" in self._rows(plan, step=STEP_ENCODE, column="grupo")[0].action.lower()
 
@@ -1998,8 +1998,8 @@ class TestPreprocessingRecommendations:
 
         rec = self._rows(plan, step=STEP_ENCODE, column="canal")
         assert len(rec) == 1
-        assert "Otros" in rec[0].action
-        assert "3 categorías" in rec[0].evidence and "1%" in rec[0].evidence
+        assert "'Other'" in rec[0].action
+        assert "3 categories" in rec[0].evidence and "1%" in rec[0].evidence
 
     def test_numbers_and_dates_are_not_encoded(self):
         from eda_pipeline.recommendations import STEP_ENCODE
@@ -2017,8 +2017,8 @@ class TestPreprocessingRecommendations:
 
         table_level = [r for r in self._rows(plan, step=STEP_SCALE) if r.column is None]
         assert len(table_level) == 1
-        assert "Escalar" in table_level[0].action
-        assert "árboles" in table_level[0].action  # says which models do not need it
+        assert "Scale" in table_level[0].action
+        assert "trees" in table_level[0].action  # says which models do not need it
 
     def test_comparable_spreads_need_no_scaling(self):
         from eda_pipeline.recommendations import STEP_SCALE
@@ -2029,7 +2029,7 @@ class TestPreprocessingRecommendations:
 
         table_level = [r for r in self._rows(plan, step=STEP_SCALE) if r.column is None]
         assert len(table_level) == 1
-        assert table_level[0].action.startswith("No hace falta")
+        assert table_level[0].action.startswith("No scaling needed")
         assert [r for r in self._rows(plan, step=STEP_SCALE) if r.column] == []
 
     def test_a_single_numeric_column_is_not_judged_on_scale(self):
@@ -2054,7 +2054,7 @@ class TestPreprocessingRecommendations:
         rec = self._rows(plan, step=STEP_SCALE, column="sesgada")
         assert len(rec) == 1
         assert "RobustScaler" in rec[0].action
-        assert "veces el rango intercuartil" in rec[0].evidence
+        assert "times its interquartile range" in rec[0].evidence
 
     def test_a_column_of_mostly_zeros_with_a_tail_gets_a_robust_scaler(self):
         """RoomService: the corrected IQR fence flags only 2% of it, but its tail still rules the mean."""
@@ -2088,7 +2088,7 @@ class TestPreprocessingRecommendations:
         rec = self._rows(plan, step=STEP_SCALE, column="medida")
         assert len(rec) == 1
         assert "StandardScaler" in rec[0].action
-        assert "concuerdan" in rec[0].evidence
+        assert "agree" in rec[0].evidence
 
     def test_a_column_already_drawn_on_a_log_scale_is_transformed_first(self):
         from eda_pipeline.recommendations import STEP_SCALE
@@ -2121,7 +2121,7 @@ class TestPreprocessingRecommendations:
         assert self._rows(plan, step=STEP_IMPUTE, column="resultado") == []
         rec = self._rows(plan, step=STEP_DROP, column="resultado")
         assert len(rec) == 1
-        assert "12 filas" in rec[0].evidence
+        assert "12 rows" in rec[0].evidence
 
     def test_the_plan_runs_in_preprocessing_order(self):
         from eda_pipeline.recommendations import STEP_ORDER

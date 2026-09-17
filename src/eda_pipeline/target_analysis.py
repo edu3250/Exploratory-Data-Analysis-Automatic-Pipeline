@@ -239,13 +239,13 @@ def detect_leakage(df: pd.DataFrame, target_col: str, feature_cols: list[str]) -
         if pd.api.types.is_numeric_dtype(target) and pd.api.types.is_numeric_dtype(feature):
             corr = target.corr(feature)
             if abs(corr) > 0.99:
-                alerts.append(f"Posible fuga: '{feat}' y '{target_col}' correlacionan {corr:.3f} (casi colineales)")
+                alerts.append(f"Possible leakage: '{feat}' and '{target_col}' correlate {corr:.3f} (almost collinear)")
 
         # If both are categorical, check for near-perfect association
         if pd.api.types.is_string_dtype(target) and pd.api.types.is_string_dtype(feature):
             ct = pd.crosstab(target, feature)
             if ct.shape[0] == ct.shape[1] and np.diag(ct).sum() == len(target):
-                alerts.append(f"Posible fuga: '{feat}' es casi idéntico a '{target_col}'")
+                alerts.append(f"Possible leakage: '{feat}' is almost identical to '{target_col}'")
 
     return alerts
 

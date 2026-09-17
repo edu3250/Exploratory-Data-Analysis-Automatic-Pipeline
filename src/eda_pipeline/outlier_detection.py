@@ -29,8 +29,8 @@ class OutlierInfo:
 # Vistara, every discount of discount_pct (0 on 77% of the rows) did. The same happened to waste and
 # waste_pct in Inventory and prima_cedida in the mortgage data. There is nothing to scale against,
 # so the method is not applied and the report says why.
-NO_SPREAD_NOTE_IQR = "Sin dispersión (IQR = 0): al menos la mitad de los valores son iguales"
-NO_SPREAD_NOTE_MAD = "Sin dispersión (MAD = 0): al menos la mitad de los valores son iguales"
+NO_SPREAD_NOTE_IQR = "No spread (IQR = 0): at least half of the values are the same"
+NO_SPREAD_NOTE_MAD = "No spread (MAD = 0): at least half of the values are the same"
 
 # A value that fills a quarter of a column lands on a quartile and the box then measures that value
 # instead of the spread. On the spaceship titanic data, RoomService is 0 on 65% of the rows, so Q1
@@ -94,8 +94,8 @@ def detect_outliers_iqr(series: pd.Series, multiplier: float = 1.5) -> OutlierIn
         if rest_q75 > rest_q25:
             share = float((valid == pinned).mean() * 100)
             note = (
-                f"El valor {pinned:g} ocupa el {share:.1f}% de las filas y se queda con un cuartil: "
-                f"el rango normal se midió sobre las demás"
+                f"The value {pinned:g} fills {share:.1f}% of the rows and takes a quartile: the "
+                f"normal range was measured over the others"
             )
             q25, q75 = rest_q25, rest_q75
             iqr = q75 - q25
@@ -222,7 +222,7 @@ def detect_outliers_isolation_forest(
     df_numeric = df[numeric_cols].dropna()
     if len(df_numeric) < ISOLATION_FOREST_MIN_ROWS:
         return [], (
-            f"No aplicado: {len(df_numeric)} filas completas; se necesitan al menos {ISOLATION_FOREST_MIN_ROWS}."
+            f"Not applied: {len(df_numeric)} complete rows, and at least {ISOLATION_FOREST_MIN_ROWS} are needed."
         )
 
     try:
@@ -232,18 +232,15 @@ def detect_outliers_isolation_forest(
                 contamination=share, random_state=random_state, n_estimators=ISOLATION_FOREST_TREES
             )
             outlier_mask = forest.fit_predict(df_numeric) == -1
-            note = f"Porcentaje fijo: el {share:.0%} de las filas (isolation_forest_contamination)."
+            note = f"Fixed share: {share:.0%} of the rows (isolation_forest_contamination)."
         else:
             forest = IsolationForest(random_state=random_state, n_estimators=ISOLATION_FOREST_TREES)
             scores = -forest.fit(df_numeric).score_samples(df_numeric)  # in (0, 1]; higher = more isolated
             cutoff = isolation_forest_cutoff(scores, iqr_multiplier)
             if cutoff is None:
-                return [], "Sin dispersión en las puntuaciones de anomalía: no se marca ninguna fila."
+                return [], "No spread in the anomaly scores: no row is flagged."
             outlier_mask = scores > cutoff
-            note = (
-                f"Puntuación de anomalía mayor que {cutoff:.3f} "
-                f"(Q3 + {iqr_multiplier:g}·IQR de las puntuaciones de este dataset)."
-            )
+            note = f"Anomaly score above {cutoff:.3f} (Q3 + {iqr_multiplier:g}·IQR of this dataset's own scores)."
     except Exception as e:
         logger.warning(f"Isolation Forest failed: {e}")
         return [], ""

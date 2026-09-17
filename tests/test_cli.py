@@ -50,7 +50,7 @@ class TestAnalyzeFile:
         result = runner.invoke(cli, ["analyze-file", str(tmp_output_dir / "no_existe.csv")])
         assert result.exit_code == 2  # click's click.Path(exists=True)
 
-    def test_unknown_target_exits_nonzero_with_spanish_message(self, runner, tmp_output_dir):
+    def test_unknown_target_exits_nonzero_and_lists_the_columns(self, runner, tmp_output_dir):
         csv_path = tmp_output_dir / "data.csv"
         _tiny_df().to_csv(csv_path, index=False)
 
@@ -59,7 +59,7 @@ class TestAnalyzeFile:
         )
 
         assert result.exit_code == 1
-        assert "no existe en el dataset" in result.output
+        assert "is not in the dataset" in result.output
         assert "Traceback" not in result.output  # a mistyped target is a user error, not a crash
 
     def test_decimal_option(self, runner, tmp_output_dir):
