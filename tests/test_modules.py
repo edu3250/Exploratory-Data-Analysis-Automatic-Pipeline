@@ -1495,5 +1495,348 @@ class TestTargetCategoricalBars:
         assert plot_target_vs_categorical(df["grupo"], df["target"], output) is False
 
 
+class TestPreprocessingRecommendations:
+    """The preprocessing plan: only the decisions the measurements settle on their own."""
+
+    @staticmethod
+    def _plan(df, target_column=None):
+        """Build the plan from the same analyses the pipeline runs."""
+        from eda_pipeline.outlier_detection import analyze_outliers
+        from eda_pipeline.recommendations import build_recommendations
+        from eda_pipeline.relationships import compute_correlation_matrix
+        from eda_pipeline.type_inference import get_numeric_columns
+        from eda_pipeline.visualizations import log_scale_columns
+
+        types = infer_all_types(df)
+        numeric_cols = get_numeric_columns(types)
+        return build_recommendations(
+            df,
+            types,
+            quality=analyze_data_quality(df, column_types=types),
+            numeric_stats=analyze_univariate(df, types).numeric_stats,
+            outliers=analyze_outliers(df, numeric_cols, isolation_forest_enabled=False),
+            correlation_matrix=compute_correlation_matrix(df, numeric_cols),
+            log_scale_columns=log_scale_columns(df, types),
+            target_column=target_column,
+        )
+
+    @staticmethod
+    def _rows(plan, step=None, column=None):
+        return [r for r in plan if (step is None or r.step == step) and (column is None or r.column == column)]
+
+    @staticmethod
+    def _frame(n=300, seed=0, **columns):
+        """A usable base frame: one amount, one measure and one group, plus whatever the test adds."""
+        rng = np.random.default_rng(seed)
+        data = {
+            "monto": rng.lognormal(mean=10, sigma=1.2, size=n),
+            "medida": rng.normal(50, 5, n),
+            "grupo": [["norte", "sur", "centro"][i % 3] for i in range(n)],
+        }
+        data.update(columns)
+        return pd.DataFrame(data)
+
+    # --- convertir -------------------------------------------------------------------------
+
+    def test_numbers_kept_as_text_are_converted_before_anything_else(self):
+        # amazon.rating: 1464 numbers read as 28 categories, so the plan offered to encode a rating.
+        from eda_pipeline.recommendations import STEP_CONVERT
+
+        plan = self._plan(self._frame(rating=[f"{3 + i % 12 / 10:.1f}" for i in range(300)]))
+
+        rec = self._rows(plan, column="rating")
+        assert len(rec) == 1
+        assert rec[0].step == STEP_CONVERT
+        assert "300 de sus 300 valores" in rec[0].evidence
+        assert plan[0].step == STEP_CONVERT  # nothing else can be decided until it is a number
+
+    # --- descartar -------------------------------------------------------------------------
+
+    def test_a_column_that_is_almost_all_gaps_is_dropped(self):
+        # penguins_lter.Comments: 92.4% missing, and nothing else in the data comes near it.
+        from eda_pipeline.recommendations import STEP_DROP
+
+        notas = [None] * 280 + [f"obs {i}" for i in range(20)]
+        plan = self._plan(self._frame(notas=notas))
+
+        rec = self._rows(plan, step=STEP_DROP, column="notas")
+        assert len(rec) == 1
+        assert "93.3%" in rec[0].evidence
+
+    def test_a_column_with_a_single_value_is_dropped(self):
+        from eda_pipeline.recommendations import STEP_DROP
+
+        plan = self._plan(self._frame(moneda=["MXN"] * 300))
+        assert self._rows(plan, step=STEP_DROP, column="moneda")
+
+    def test_an_identifier_is_excluded_from_the_model(self):
+        from eda_pipeline.recommendations import STEP_DROP
+
+        plan = self._plan(self._frame(cliente_id=[f"C{i:05d}" for i in range(300)]))
+
+        rec = self._rows(plan, step=STEP_DROP, column="cliente_id")
+        assert len(rec) == 1
+        assert "300 valores distintos" in rec[0].evidence
+
+    def test_repeated_rows_are_reported_for_the_whole_table(self):
+        from eda_pipeline.recommendations import STEP_DROP
+
+        df = self._frame(n=100)
+        df = pd.concat([df, df.head(10)], ignore_index=True)
+        plan = self._plan(df)
+
+        rec = [r for r in self._rows(plan, step=STEP_DROP) if r.column is None]
+        assert len(rec) == 1
+        assert "10 de 110 filas" in rec[0].evidence
+
+    def test_two_columns_that_say_the_same_thing_keep_only_one(self):
+        # credito_asegurado: monto_credito ~ saldo_principal, r = 0.995.
+        from eda_pipeline.recommendations import STEP_DROP
+
+        df = self._frame()
+        rng = np.random.default_rng(7)
+        df["saldo"] = df["monto"] * 0.98 + rng.normal(0, df["monto"].std() * 0.08, len(df))
+        plan = self._plan(df)
+
+        rec = [r for r in self._rows(plan, step=STEP_DROP) if r.column and "monto" in r.column and "saldo" in r.column]
+        assert len(rec) == 1
+        assert "r = 0.99" in rec[0].evidence
+
+    def test_a_dropped_column_gets_no_further_recommendation(self):
+        from eda_pipeline.recommendations import STEP_DROP
+
+        plan = self._plan(self._frame(cliente_id=[f"C{i:05d}" for i in range(300)]))
+
+        steps = {r.step for r in self._rows(plan, column="cliente_id")}
+        assert steps == {STEP_DROP}
+
+    # --- imputar ---------------------------------------------------------------------------
+
+    def test_a_skewed_column_is_imputed_with_the_median_because_the_mean_is_pulled(self):
+        from eda_pipeline.recommendations import STEP_IMPUTE
+
+        df = self._frame()
+        df.loc[df.index[:20], "monto"] = None
+        plan = self._plan(df)
+
+        rec = self._rows(plan, step=STEP_IMPUTE, column="monto")
+        assert len(rec) == 1
+        assert "mediana" in rec[0].action.lower()
+        assert "desplazada" in rec[0].evidence
+
+    def test_a_symmetric_column_says_both_averages_agree(self):
+        from eda_pipeline.recommendations import MEAN_MEDIAN_GAP, STEP_IMPUTE
+
+        df = self._frame()
+        df.loc[df.index[:20], "medida"] = None
+        plan = self._plan(df)
+
+        rec = self._rows(plan, step=STEP_IMPUTE, column="medida")
+        assert len(rec) == 1
+        assert "coinciden" in rec[0].evidence
+        assert f"{MEAN_MEDIAN_GAP:.2f}" in rec[0].evidence
+
+    def test_a_category_with_few_gaps_is_filled_with_the_most_common_value(self):
+        from eda_pipeline.recommendations import STEP_IMPUTE
+
+        df = self._frame()
+        df.loc[df.index[:9], "grupo"] = None  # 3%
+        plan = self._plan(df)
+
+        rec = self._rows(plan, step=STEP_IMPUTE, column="grupo")
+        assert len(rec) == 1
+        assert "moda" in rec[0].action.lower()
+
+    def test_a_category_with_many_gaps_gets_its_own_unknown_value(self):
+        from eda_pipeline.recommendations import STEP_IMPUTE
+
+        df = self._frame()
+        df.loc[df.index[:60], "grupo"] = None  # 20%
+        plan = self._plan(df)
+
+        rec = self._rows(plan, step=STEP_IMPUTE, column="grupo")
+        assert len(rec) == 1
+        assert "Desconocido" in rec[0].action
+
+    def test_a_column_without_gaps_is_not_imputed(self):
+        from eda_pipeline.recommendations import STEP_IMPUTE
+
+        plan = self._plan(self._frame())
+        assert self._rows(plan, step=STEP_IMPUTE) == []
+
+    # --- codificar -------------------------------------------------------------------------
+
+    def test_a_two_valued_column_becomes_one_zero_one_column(self):
+        from eda_pipeline.recommendations import STEP_ENCODE
+
+        plan = self._plan(self._frame(activo=[["si", "no"][i % 2] for i in range(300)]))
+
+        rec = self._rows(plan, step=STEP_ENCODE, column="activo")
+        assert len(rec) == 1
+        assert "0/1" in rec[0].action
+
+    def test_a_handful_of_categories_get_one_hot(self):
+        from eda_pipeline.recommendations import STEP_ENCODE
+
+        plan = self._plan(self._frame())
+
+        rec = self._rows(plan, step=STEP_ENCODE, column="grupo")
+        assert len(rec) == 1
+        assert "one-hot" in rec[0].action.lower()
+        assert "3 categorías" in rec[0].evidence
+
+    def test_too_many_categories_rule_one_hot_out(self):
+        # clientes.tipo_empleo: 21 categories. credito_asegurado.clave_administrador: 36.
+        from eda_pipeline.recommendations import ONE_HOT_MAX_CATEGORIES, STEP_ENCODE
+
+        n_cats = ONE_HOT_MAX_CATEGORIES + 5
+        plan = self._plan(self._frame(sector=[f"sector_{i % n_cats}" for i in range(300)]))
+
+        rec = self._rows(plan, step=STEP_ENCODE, column="sector")
+        assert len(rec) == 1
+        assert rec[0].action.startswith("Evitar one-hot")
+        assert f"{n_cats} categorías" in rec[0].evidence
+
+    def test_one_hot_is_ruled_out_when_it_would_add_a_column_per_few_rows(self):
+        # Vistara Products.color: 14 categories over 40 rows.
+        from eda_pipeline.recommendations import STEP_ENCODE
+
+        df = self._frame(n=40, color=[f"color_{i % 14}" for i in range(40)])
+        plan = self._plan(df)
+
+        rec = self._rows(plan, step=STEP_ENCODE, column="color")
+        assert len(rec) == 1
+        assert rec[0].action.startswith("Evitar one-hot")
+        assert "40 filas" in rec[0].evidence
+        # Three categories over the same 40 rows are still fine.
+        assert "one-hot" in self._rows(plan, step=STEP_ENCODE, column="grupo")[0].action.lower()
+
+    def test_rare_categories_are_grouped_before_one_hot(self):
+        from eda_pipeline.recommendations import STEP_ENCODE
+
+        valores = ["comun"] * 290 + ["raro_a"] * 2 + ["raro_b"] * 2 + ["raro_c"] * 2 + ["otro"] * 4
+        plan = self._plan(self._frame(canal=valores))
+
+        rec = self._rows(plan, step=STEP_ENCODE, column="canal")
+        assert len(rec) == 1
+        assert "Otros" in rec[0].action
+        assert "3 categorías" in rec[0].evidence and "1%" in rec[0].evidence
+
+    def test_numbers_and_dates_are_not_encoded(self):
+        from eda_pipeline.recommendations import STEP_ENCODE
+
+        plan = self._plan(self._frame(fecha=pd.date_range("2024-01-01", periods=300)))
+        assert {r.column for r in self._rows(plan, step=STEP_ENCODE)} == {"grupo"}
+
+    # --- escalar ---------------------------------------------------------------------------
+
+    def test_scaling_is_called_for_when_the_spreads_are_incomparable(self):
+        # cobranza: the widest column spreads 2 100 million times more than the narrowest.
+        from eda_pipeline.recommendations import STEP_SCALE
+
+        plan = self._plan(self._frame())
+
+        table_level = [r for r in self._rows(plan, step=STEP_SCALE) if r.column is None]
+        assert len(table_level) == 1
+        assert "Escalar" in table_level[0].action
+        assert "árboles" in table_level[0].action  # says which models do not need it
+
+    def test_comparable_spreads_need_no_scaling(self):
+        from eda_pipeline.recommendations import STEP_SCALE
+
+        rng = np.random.default_rng(0)
+        df = pd.DataFrame({"peso": rng.normal(70, 10, 300), "altura": rng.normal(170, 12, 300)})
+        plan = self._plan(df)
+
+        table_level = [r for r in self._rows(plan, step=STEP_SCALE) if r.column is None]
+        assert len(table_level) == 1
+        assert table_level[0].action.startswith("No hace falta")
+        assert [r for r in self._rows(plan, step=STEP_SCALE) if r.column] == []
+
+    def test_a_single_numeric_column_is_not_judged_on_scale(self):
+        """With one column there is nothing to compare its spread against, so the plan says nothing."""
+        from eda_pipeline.recommendations import STEP_SCALE
+
+        df = pd.DataFrame(
+            {
+                "precio": [10.0 + i * 1.7 for i in range(60)],
+                "grupo": [["norte", "sur"][i % 2] for i in range(60)],
+            }
+        )
+        assert self._rows(self._plan(df), step=STEP_SCALE) == []
+
+    def test_a_column_with_a_heavy_tail_gets_a_robust_scaler(self):
+        from eda_pipeline.recommendations import STEP_SCALE
+
+        rng = np.random.default_rng(1)
+        valores = np.concatenate([rng.normal(100, 5, 270), rng.normal(900, 50, 30)])  # 10% far out
+        plan = self._plan(self._frame(sesgada=valores))
+
+        rec = self._rows(plan, step=STEP_SCALE, column="sesgada")
+        assert len(rec) == 1
+        assert "RobustScaler" in rec[0].action
+        assert "outliers" in rec[0].evidence
+
+    def test_a_well_behaved_column_gets_a_standard_scaler(self):
+        from eda_pipeline.recommendations import STEP_SCALE
+
+        plan = self._plan(self._frame())
+
+        rec = self._rows(plan, step=STEP_SCALE, column="medida")
+        assert len(rec) == 1
+        assert "StandardScaler" in rec[0].action
+
+    def test_a_column_already_drawn_on_a_log_scale_is_transformed_first(self):
+        from eda_pipeline.recommendations import STEP_SCALE
+
+        rng = np.random.default_rng(0)
+        plan = self._plan(self._frame(monto=rng.lognormal(mean=13, sigma=2.5, size=300)))
+
+        rec = self._rows(plan, step=STEP_SCALE, column="monto")
+        assert len(rec) == 1
+        assert "log10" in rec[0].action
+
+    # --- target y orden --------------------------------------------------------------------
+
+    def test_the_target_is_neither_encoded_nor_scaled(self):
+        from eda_pipeline.recommendations import STEP_ENCODE, STEP_SCALE
+
+        df = self._frame(resultado=[["alta", "baja"][i % 2] for i in range(300)])
+        plan = self._plan(df, target_column="resultado")
+
+        assert self._rows(plan, step=STEP_ENCODE, column="resultado") == []
+        assert self._rows(plan, step=STEP_SCALE, column="resultado") == []
+
+    def test_rows_without_a_target_value_are_dropped_instead_of_imputed(self):
+        from eda_pipeline.recommendations import STEP_DROP, STEP_IMPUTE
+
+        df = self._frame(resultado=[["alta", "baja"][i % 2] for i in range(300)])
+        df.loc[df.index[:12], "resultado"] = None
+        plan = self._plan(df, target_column="resultado")
+
+        assert self._rows(plan, step=STEP_IMPUTE, column="resultado") == []
+        rec = self._rows(plan, step=STEP_DROP, column="resultado")
+        assert len(rec) == 1
+        assert "12 filas" in rec[0].evidence
+
+    def test_the_plan_runs_in_preprocessing_order(self):
+        from eda_pipeline.recommendations import STEP_ORDER
+
+        df = self._frame(
+            cliente_id=[f"C{i:05d}" for i in range(300)],
+            rating=[f"{3 + i % 12 / 10:.1f}" for i in range(300)],
+        )
+        df.loc[df.index[:10], "medida"] = None
+        plan = self._plan(df)
+
+        positions = [STEP_ORDER.index(r.step) for r in plan]
+        assert positions == sorted(positions)
+        assert {r.step for r in plan} == set(STEP_ORDER)
+
+    def test_free_text_alone_produces_no_plan(self):
+        df = pd.DataFrame({"comentario": [f"el cliente {i} dejo una nota larga sobre el servicio" for i in range(60)]})
+        assert self._plan(df) == []
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

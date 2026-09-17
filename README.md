@@ -448,6 +448,41 @@ categórica, con el porcentaje sobre el total encima de cada barra. Se omiten lo
 regresión y los de más de 12 clases, donde el gráfico deja de leerse; las categorías más allá de
 las 9 más frecuentes se agrupan en «Otros».
 
+### Plan de preprocesamiento
+
+El reporte termina con un plan en cinco pasos, en el orden en que se aplican, y cada línea lleva al
+lado la medición que la produjo, para poder comprobarla en vez de creerla. También queda en
+`summary.json → recommendations` y en `tables/recommendations.csv`.
+
+**Solo está aquí lo que los datos deciden por sí solos.** Quedan fuera dos cosas que no se pueden
+leer de la tabla: si una variable categórica es *ordinal* y en qué orden van sus niveles (sobre las
+89 columnas categóricas de `data/raw` una regla automática no acierta el orden de ninguna), y si el
+modelo necesita escalado (un árbol no; una distancia o una penalización sí). El plan dice que las
+magnitudes son incomparables —eso es un hecho medido— y deja la decisión del escalado al lector.
+
+1. **Convertir**: columnas cuyos valores son números guardados como texto (las que ya detecta la
+   alerta de calidad). Mientras sigan así se analizan como categorías, así que esperan a los demás
+   pasos en vez de recibir consejos que suponen que son categorías: `amazon.rating` guarda 1 464
+   números leídos como 28 categorías.
+2. **Descartar**: filas repetidas, filas sin target, columnas con un solo valor o casi, columnas a
+   las que les falta más del 60 % de los valores, identificadores, y pares de columnas con |r| ≥ 0.95
+   (de los cuales se conserva una, cuál es decisión suya).
+3. **Imputar**: la mediana en las numéricas, diciendo si la media queda desplazada por la cola o si
+   ambas dan el mismo valor (menos de 0.10 desviaciones de diferencia, donde la elección da igual).
+   En las categóricas, la moda si falta un 5 % o menos, y una categoría explícita «Desconocido» si
+   falta más: imputar con la moda le daría a un valor un peso que no tiene.
+4. **Codificar**: una sola columna 0/1 con dos categorías; one-hot hasta 15 categorías, siempre que
+   la tabla tenga al menos 20 filas por columna nueva (tres categorías se admiten siempre); si alguna
+   categoría no llega al 1 % de las filas, agruparlas en «Otros» antes. Por encima de eso, el plan
+   desaconseja el one-hot y sugiere agrupar o codificar por frecuencia.
+5. **Escalar**: primero si hace falta, comparando la desviación mayor con la menor (a partir de 10
+   veces); después qué escalador conviene a cada columna: `log10` antes de escalar si ya se dibuja en
+   escala logarítmica, `RobustScaler` si más del 5 % de sus valores son outliers por IQR, y
+   `StandardScaler` en el resto.
+
+Cada umbral se fijó midiendo los 24 datasets de `data/raw` antes de escribir la regla; el porqué de
+cada uno está comentado en `src/eda_pipeline/recommendations.py`.
+
 ### Manejo de errores por paso
 
 Cada paso del análisis (calidad, univariado, relaciones, outliers, target, visualizaciones,

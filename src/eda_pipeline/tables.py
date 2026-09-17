@@ -42,6 +42,7 @@ def write_result_tables(
     alerts: list,
     column_types: dict[str, str] | None = None,
     column_dtypes: dict[str, str] | None = None,
+    recommendations: list | None = None,
 ) -> dict[str, str]:
     """
     Write CSV tables summarizing one dataset's analysis.
@@ -56,6 +57,7 @@ def write_result_tables(
         alerts: Combined list of ``Alert`` (data quality + target-derived).
         column_types: Inferred semantic type per column, written next to its missing percentage.
         column_dtypes: Storage dtype per column, written next to the inferred type.
+        recommendations: The preprocessing plan (``Recommendation`` list) from recommendations.py.
 
     Returns:
         Dict mapping table name to the written CSV file path.
@@ -92,10 +94,26 @@ def write_result_tables(
         ),
         "outlier_summary": _write_csv(tables_dir, "outlier_summary", _outlier_summary_table(outliers_report)),
         "alerts": _write_csv(tables_dir, "alerts", pd.DataFrame([asdict(alert) for alert in alerts])),
+        "recommendations": _write_csv(tables_dir, "recommendations", _recommendations_table(recommendations)),
     }
 
     logger.info(f"Tablas CSV escritas en: {tables_dir}")
     return written
+
+
+def _recommendations_table(recommendations) -> pd.DataFrame:
+    """The preprocessing plan as rows: the step, the column it applies to, what to do and why."""
+    return pd.DataFrame(
+        [
+            {
+                "paso": rec.step,
+                "columna": rec.column if rec.column else "(toda la tabla)",
+                "accion": rec.action,
+                "evidencia": rec.evidence,
+            }
+            for rec in recommendations or []
+        ]
+    )
 
 
 def _outlier_summary_table(outliers_report) -> pd.DataFrame:

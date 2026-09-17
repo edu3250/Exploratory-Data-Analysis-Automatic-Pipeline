@@ -18,6 +18,7 @@ from .data_quality import SEVERITY_ORDER, Alert, DataQualityReport, analyze_data
 from .html_report import generate_html_report
 from .logging_util import generate_correlation_id, setup_logging
 from .outlier_detection import OutlierReport, analyze_outliers
+from .recommendations import build_recommendations
 from .relationships import RelationshipsReport, analyze_relationships
 from .tables import write_result_tables
 from .target_analysis import analyze_target
@@ -433,6 +434,25 @@ class EDAPipeline:
             default=None,
         )
 
+        self.logger.info("Building the preprocessing plan...")
+        recommendations = (
+            self._run_step(
+                "recommendations",
+                failed_steps,
+                build_recommendations,
+                df,
+                column_types,
+                quality=dq_report,
+                numeric_stats=univariate_report.numeric_stats,
+                outliers=outliers_report,
+                correlation_matrix=relationships_report.correlation_matrix,
+                log_scale_columns=log_scale,
+                target_column=target_column,
+                default=[],
+            )
+            or []
+        )
+
         self.logger.info("Generating visualizations...")
         output_dir = self._dataset_output_dir(dataset_name, batch_dir)
         plots_dir = output_dir / "plots"
@@ -481,6 +501,7 @@ class EDAPipeline:
             alerts=combined_alerts,
             column_types=column_types,
             column_dtypes=column_dtypes,
+            recommendations=recommendations,
             default=None,
         )
 
@@ -521,6 +542,7 @@ class EDAPipeline:
             time_stats=univariate_report.time_stats,
             pair_plot=pair_plot,
             log_scale_columns=list(log_scale),
+            recommendations=recommendations,
             default=None,
         )
 
@@ -575,6 +597,7 @@ class EDAPipeline:
             },
             "pair_plot": asdict(pair_plot) if pair_plot else None,
             "log_scale_columns": {col: asdict(check) for col, check in log_scale.items()},
+            "recommendations": [asdict(rec) for rec in recommendations],
             "failed_steps": failed_steps,
         }
 
