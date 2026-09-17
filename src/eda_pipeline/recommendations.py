@@ -20,21 +20,21 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-STEP_CONVERT = "convertir"
-STEP_DROP = "descartar"
-STEP_IMPUTE = "imputar"
-STEP_ENCODE = "codificar"
-STEP_SCALE = "escalar"
+STEP_CONVERT = "convert"
+STEP_DROP = "drop"
+STEP_IMPUTE = "impute"
+STEP_ENCODE = "encode"
+STEP_SCALE = "scale"
 STEP_ORDER = [STEP_CONVERT, STEP_DROP, STEP_IMPUTE, STEP_ENCODE, STEP_SCALE]
 
-# Numbering these would leave gaps: a report without numbers kept as text starts at "Descartar",
+# Numbering these would leave gaps: a report without numbers kept as text starts at "Drop",
 # and a "2." with no "1." above it reads as something missing. The order is the order of the sections.
 STEP_LABELS = {
-    STEP_CONVERT: "Convertir",
-    STEP_DROP: "Descartar",
-    STEP_IMPUTE: "Imputar",
-    STEP_ENCODE: "Codificar",
-    STEP_SCALE: "Escalar",
+    STEP_CONVERT: "Convert",
+    STEP_DROP: "Drop",
+    STEP_IMPUTE: "Fill in",
+    STEP_ENCODE: "Encode",
+    STEP_SCALE: "Scale",
 }
 
 NUMERIC_TYPES = ("numeric_continuous", "numeric_discrete")
@@ -111,7 +111,7 @@ def _number(value: float) -> str:
 
 
 def _plural(count: int, singular: str, plural: str) -> str:
-    """The count with the form that agrees with it: "1 categoría", "3 categorías"."""
+    """The count with the form that agrees with it: "1 category", "3 categories"."""
     return f"{count} {singular if count == 1 else plural}"
 
 
@@ -142,11 +142,11 @@ def drop_recommendations(df, column_types, quality, target_column=None) -> list[
             Recommendation(
                 step=STEP_DROP,
                 column=None,
-                action="Eliminar las filas repetidas antes de separar entrenamiento y prueba",
+                action="Remove the repeated rows before splitting train and test",
                 evidence=(
-                    f"{duplicates} de {n_rows} filas están repetidas "
-                    f"({duplicates / n_rows * 100:.1f}% del total); repartidas entre los dos "
-                    f"conjuntos, el modelo se evalúa sobre filas que ya vio"
+                    f"{duplicates} of the {n_rows} rows are repeated "
+                    f"({duplicates / n_rows * 100:.1f}% of the table); split across both sets, the "
+                    f"model is scored on rows it has already seen"
                 ),
             )
         )
@@ -158,10 +158,10 @@ def drop_recommendations(df, column_types, quality, target_column=None) -> list[
                 Recommendation(
                     step=STEP_DROP,
                     column=target_column,
-                    action="Descartar las filas sin valor de target",
+                    action="Drop the rows with no target value",
                     evidence=(
-                        f"{missing_rows} filas ({missing_rows / n_rows * 100:.1f}%) no tienen target; "
-                        f"imputarlo sería inventar la respuesta que se quiere predecir"
+                        f"{missing_rows} rows ({missing_rows / n_rows * 100:.1f}%) have no target; "
+                        f"filling it in would invent the answer you want to predict"
                     ),
                 )
             )
@@ -176,21 +176,21 @@ def drop_recommendations(df, column_types, quality, target_column=None) -> list[
         missing_pct = _missing_pct(df, column, quality)
 
         if missing_pct >= DROP_MISSING_PCT:
-            action = "Descartar la columna, o conservar solo una marca de si el dato está"
+            action = "Drop the column, or keep only a flag for whether the value is there"
             evidence = (
-                f"Falta el {missing_pct:.1f}% de los valores: quedan {int(df[column].notna().sum())} filas con dato"
+                f"{missing_pct:.1f}% of the values are missing: {int(df[column].notna().sum())} rows still have one"
             )
         elif column in constant_columns or semantic_type == "constant":
-            action = "Descartar la columna"
-            evidence = f"Un solo valor en las {n_rows} filas: no distingue nada"
+            action = "Drop the column"
+            evidence = f"One single value across the {n_rows} rows: it distinguishes nothing"
         elif column in quasi_constant:
-            action = "Descartar la columna"
-            evidence = f"Un mismo valor en el {quasi_constant[column]:.1f}% de las filas"
+            action = "Drop the column"
+            evidence = f"The same value on {quasi_constant[column]:.1f}% of the rows"
         elif semantic_type == "identifier":
-            action = "Excluir del modelo: identifica la fila, no la describe"
+            action = "Exclude from the model: it names the row, it does not describe it"
             evidence = (
-                f"Clasificada como identificador: {int(df[column].nunique(dropna=True))} valores "
-                f"distintos en {n_rows} filas"
+                f"Classified as an identifier: {int(df[column].nunique(dropna=True))} distinct "
+                f"values across {n_rows} rows"
             )
         else:
             continue
@@ -221,10 +221,10 @@ def conversion_recommendations(df, column_types, quality, skip=()) -> list[Recom
             Recommendation(
                 step=STEP_CONVERT,
                 column=column,
-                action="Convertir a número y volver a ejecutar el análisis",
+                action="Convert it to a number and run the analysis again",
                 evidence=(
-                    f"{numeric_as_text[column]} de sus {present} valores son números guardados como "
-                    f"texto: mientras sigan así, la columna se analiza como categoría"
+                    f"{numeric_as_text[column]} of its {present} values are numbers kept as text: "
+                    f"while they stay that way, the column is analysed as a category"
                 ),
             )
         )
@@ -255,8 +255,8 @@ def redundancy_recommendations(correlation_matrix, skip=()) -> list[Recommendati
         Recommendation(
             step=STEP_DROP,
             column=f"{first} / {second}",
-            action="Conservar solo una de las dos",
-            evidence=f"r = {value:.3f}: cada una se puede predecir desde la otra",
+            action="Keep only one of the two",
+            evidence=f"r = {value:.3f}: either one can be predicted from the other",
         )
         for first, second, value in redundant_pairs(correlation_matrix, skip)
     ]
@@ -281,16 +281,16 @@ def imputation_recommendations(df, column_types, numeric_stats, quality, skip=()
                 continue
             spread = float(stats.std) if np.isfinite(stats.std) else 0.0
             gap = abs(float(stats.mean) - float(stats.median)) / spread if spread > 0 else 0.0
-            action = f"Imputar con la mediana ({_number(stats.median)})"
+            action = f"Fill in with the median ({_number(stats.median)})"
             if gap >= MEAN_MEDIAN_GAP:
                 evidence = (
-                    f"Falta el {missing_pct:.1f}%. La media ({_number(stats.mean)}) queda desplazada "
-                    f"{gap:.2f} desviaciones respecto a la mediana, arrastrada por la cola"
+                    f"{missing_pct:.1f}% missing. The mean ({_number(stats.mean)}) sits {gap:.2f} standard "
+                    f"deviations away from the median, pulled by the tail"
                 )
             else:
                 evidence = (
-                    f"Falta el {missing_pct:.1f}%. Media ({_number(stats.mean)}) y mediana coinciden dentro de "
-                    f"{gap:.3f} desviaciones, por debajo de {MEAN_MEDIAN_GAP:.2f}: cualquiera de las dos sirve"
+                    f"{missing_pct:.1f}% missing. The mean ({_number(stats.mean)}) and the median agree within "
+                    f"{gap:.3f} standard deviations, below {MEAN_MEDIAN_GAP:.2f}: either one will do"
                 )
 
         elif semantic_type in CATEGORICAL_TYPES:
@@ -299,16 +299,16 @@ def imputation_recommendations(df, column_types, numeric_stats, quality, skip=()
                 continue
             mode_share = float(counts.iloc[0] / counts.sum() * 100)
             if missing_pct <= MODE_MAX_MISSING_PCT:
-                action = f"Imputar con la moda ('{_short(counts.index[0])}')"
+                action = f"Fill in with the most common value ('{_short(counts.index[0])}')"
                 evidence = (
-                    f"Falta el {missing_pct:.1f}%, y esa moda ya es el {mode_share:.1f}% "
-                    f"de los valores presentes: la distribución apenas se mueve"
+                    f"{missing_pct:.1f}% missing, and that value already covers {mode_share:.1f}% of the "
+                    f"rows that have one: the distribution barely moves"
                 )
             else:
-                action = "Crear una categoría explícita 'Desconocido'"
+                action = "Add an explicit 'Unknown' category"
                 evidence = (
-                    f"Falta el {missing_pct:.1f}%: imputar con la moda llevaría todas esas filas "
-                    f"a un mismo valor y le daría un peso que no tiene"
+                    f"{missing_pct:.1f}% missing: filling that in with the most common value would move "
+                    f"all those rows onto it and give it a weight it does not have"
                 )
         else:
             continue
@@ -339,27 +339,27 @@ def encoding_recommendations(df, column_types, skip=(), target_column=None) -> l
         )
 
         if n_categories == 2:
-            action = "Una sola columna 0/1"
-            evidence = f"2 categorías: '{_short(counts.index[0])}' y '{_short(counts.index[1])}'"
+            action = "A single 0/1 column"
+            evidence = f"2 categories: '{_short(counts.index[0])}' and '{_short(counts.index[1])}'"
         elif fits_one_hot and rare:
-            action = f"Agrupar en 'Otros' las categorías por debajo del {RARE_CATEGORY_PCT:.0f}% y aplicar one-hot"
+            action = f"Group the categories under {RARE_CATEGORY_PCT:.0f}% into 'Other', then one-hot"
             evidence = (
-                f"{n_categories} categorías en {n_rows} filas, de las cuales "
-                f"{_plural(len(rare), 'categoría aparece', 'categorías aparecen')} en menos del "
-                f"{RARE_CATEGORY_PCT:.0f}% de las filas"
+                f"{n_categories} categories across {n_rows} rows, and "
+                f"{_plural(len(rare), 'category appears', 'categories appear')} on fewer than "
+                f"{RARE_CATEGORY_PCT:.0f}% of them"
             )
         elif fits_one_hot:
-            action = f"Aplicar one-hot ({n_categories} columnas nuevas)"
-            evidence = f"{n_categories} categorías en {n_rows} filas, todas con presencia suficiente"
+            action = f"One-hot ({n_categories} new columns)"
+            evidence = f"{n_categories} categories across {n_rows} rows, each with enough of them"
         elif n_categories > ONE_HOT_MAX_CATEGORIES:
-            action = "Evitar one-hot: agrupar en 'Otros' las categorías raras, o codificar por frecuencia"
-            evidence = f"{n_categories} categorías en {n_rows} filas: el one-hot añadiría {n_categories} columnas"
+            action = "Avoid one-hot: group the rare categories into 'Other', or encode by frequency"
+            evidence = f"{n_categories} categories across {n_rows} rows: one-hot would add {n_categories} columns"
         else:
             # Few categories, but a table too small to spend a whole column on each of them.
-            action = "Evitar one-hot con tan pocas filas: codificar por frecuencia, o agrupar categorías"
+            action = "Avoid one-hot with so few rows: encode by frequency, or group categories"
             evidence = (
-                f"{n_categories} categorías en {n_rows} filas: el one-hot dejaría una columna nueva "
-                f"por cada {_plural(round(n_rows / n_categories), 'fila', 'filas')}"
+                f"{n_categories} categories across {n_rows} rows: one-hot would leave one new column "
+                f"per {_plural(round(n_rows / n_categories), 'row', 'rows')}"
             )
 
         recs.append(Recommendation(step=STEP_ENCODE, column=column, action=action, evidence=evidence))
@@ -407,10 +407,10 @@ def scaling_recommendations(
             Recommendation(
                 step=STEP_SCALE,
                 column=None,
-                action="No hace falta escalar por diferencia de magnitudes",
+                action="No scaling needed for a difference in magnitudes",
                 evidence=(
-                    f"La desviación de {widest} ({_number(spreads[widest])}) es solo {ratio:.1f} veces "
-                    f"la de {narrowest} ({_number(spreads[narrowest])})"
+                    f"The spread of {widest} ({_number(spreads[widest])}) is only {ratio:.1f} times "
+                    f"that of {narrowest} ({_number(spreads[narrowest])})"
                 ),
             )
         ]
@@ -420,13 +420,13 @@ def scaling_recommendations(
             step=STEP_SCALE,
             column=None,
             action=(
-                "Escalar las variables numéricas si el modelo es sensible a la escala (regresión "
-                "regularizada, SVM, kNN, k-means, redes); los árboles y el boosting no lo necesitan"
+                "Scale the numeric columns if your model is sensitive to scale (regularised "
+                "regression, SVM, kNN, k-means, neural nets); trees and boosting do not need it"
             ),
             evidence=(
-                f"La desviación de {widest} ({_number(spreads[widest])}) es {_number(ratio)} veces "
-                f"la de {narrowest} ({_number(spreads[narrowest])}): sin escalar, la primera domina "
-                f"cualquier distancia o penalización"
+                f"The spread of {widest} ({_number(spreads[widest])}) is {_number(ratio)} times that "
+                f"of {narrowest} ({_number(spreads[narrowest])}): unscaled, the first one dominates "
+                f"any distance or penalty"
             ),
         )
     ]
@@ -435,23 +435,23 @@ def scaling_recommendations(
         stats = numeric_stats[column]
         ratio = spread_ratio(stats)
         if column in log_columns:
-            action = "Aplicar log10 y después StandardScaler"
-            evidence = "Ya se dibuja en escala logarítmica: su cola se come el eje lineal"
+            action = "Take log10, then StandardScaler"
+            evidence = "Already drawn on a log scale: its tail eats the linear axis"
         elif not np.isfinite(ratio):
             # RobustScaler divides by the interquartile range, and here there is none to divide by.
-            action = "StandardScaler (media y desviación)"
-            evidence = "Al menos la mitad de sus valores son iguales (IQR = 0): RobustScaler no tendría divisor"
+            action = "StandardScaler (mean and standard deviation)"
+            evidence = "At least half of its values are the same (IQR = 0): RobustScaler would have no divisor"
         elif ratio > ROBUST_SCALER_SPREAD_RATIO:
-            action = "RobustScaler (mediana e IQR)"
+            action = "RobustScaler (median and IQR)"
             evidence = (
-                f"Su desviación ({_number(stats.std)}) es {_number(ratio)} veces el rango intercuartil "
-                f"({_number(stats.iqr)}): la cola arrastra la media y la desviación que usaría StandardScaler"
+                f"Its standard deviation ({_number(stats.std)}) is {_number(ratio)} times its interquartile "
+                f"range ({_number(stats.iqr)}): the tail drags the two numbers StandardScaler would use"
             )
         else:
-            action = "StandardScaler (media y desviación)"
+            action = "StandardScaler (mean and standard deviation)"
             evidence = (
-                f"Su desviación ({_number(stats.std)}) y su rango intercuartil ({_number(stats.iqr)}) "
-                f"concuerdan: la media y la desviación describen bien la columna"
+                f"Its standard deviation ({_number(stats.std)}) and its interquartile range "
+                f"({_number(stats.iqr)}) agree: the mean and the standard deviation describe it well"
             )
         recs.append(Recommendation(step=STEP_SCALE, column=column, action=action, evidence=evidence))
 
@@ -499,7 +499,7 @@ def build_recommendations(
     plan += encoding_recommendations(df, column_types, pending, target_column)
     plan += scaling_recommendations(df, column_types, numeric_stats, log_scale_columns, pending, target_column)
 
-    logger.info(f"Plan de preprocesamiento: {len(plan)} recomendación(es)")
+    logger.info(f"Preprocessing plan: {len(plan)} recommendation(s)")
     return plan
 
 

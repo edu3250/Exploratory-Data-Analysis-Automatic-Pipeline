@@ -65,8 +65,8 @@ def analyze_missing(
                 Alert(
                     severity="high",
                     column=col,
-                    message=f"Columna '{col}': {pct:.1f}% valores faltantes",
-                    recommendation="Considere eliminar esta columna o usar imputación avanzada",
+                    message=f"Column '{col}': {pct:.1f}% of its values are missing",
+                    recommendation="Consider dropping this column, or imputing it from the other columns",
                 )
             )
         elif pct > 50:
@@ -74,8 +74,8 @@ def analyze_missing(
                 Alert(
                     severity="medium",
                     column=col,
-                    message=f"Columna '{col}': {pct:.1f}% valores faltantes",
-                    recommendation="Evalúe si el patrón de falta es informativo o aleatorio",
+                    message=f"Column '{col}': {pct:.1f}% of its values are missing",
+                    recommendation="Check whether what is missing carries information or is missing at random",
                 )
             )
 
@@ -87,8 +87,8 @@ def analyze_missing(
             Alert(
                 severity="high",
                 column=None,
-                message=f"{len(rows_with_all_missing)} fila(s) completamente vacía(s)",
-                recommendation="Elimine estas filas antes del análisis",
+                message=f"{len(rows_with_all_missing)} completely empty row(s)",
+                recommendation="Remove these rows",
             )
         )
 
@@ -114,7 +114,7 @@ def _sort_duplicate_rows(duplicate_rows: pd.DataFrame) -> pd.DataFrame:
         try:
             return duplicate_rows.sort_values(by=columns, key=lambda col: col.astype(str))
         except Exception as e:
-            logger.warning(f"No se pudieron ordenar las filas duplicadas ({e}); se devuelven sin ordenar.")
+            logger.warning(f"Could not sort the duplicate rows ({e}); returning them unsorted.")
             return duplicate_rows
 
 
@@ -148,8 +148,8 @@ def analyze_duplicates(df: pd.DataFrame, duplicate_threshold: float = 0.1) -> tu
             Alert(
                 severity=severity,
                 column=None,
-                message=f"{n_duplicates} filas duplicadas exactas ({dup_ratio * 100:.2f}%)",
-                recommendation="Investigue si los duplicados son legítimos o errores de entrada",
+                message=f"{n_duplicates} exact duplicate rows ({dup_ratio * 100:.2f}%)",
+                recommendation="Check whether the duplicates are legitimate or an entry error",
             )
         )
 
@@ -186,8 +186,8 @@ def analyze_constants(
             Alert(
                 severity="high",
                 column=None,
-                message=f"{len(constant_cols)} columna(s) con un único valor: {', '.join(constant_cols)}",
-                recommendation="Elimine estas columnas; no tienen varianza",
+                message=f"{len(constant_cols)} column(s) hold a single value: {', '.join(constant_cols)}",
+                recommendation="Drop these columns: they distinguish nothing",
             )
         )
 
@@ -196,8 +196,8 @@ def analyze_constants(
             Alert(
                 severity="medium",
                 column=col,
-                message=f"Columna casi constante: {pct:.1f}% un único valor",
-                recommendation="Esta variable tiene poca capacidad predictiva",
+                message=f"Almost constant column: one value on {pct:.1f}% of the rows",
+                recommendation="There is little left for a model to learn from",
             )
         )
 
@@ -249,8 +249,8 @@ def analyze_cardinality(
             Alert(
                 severity="low",
                 column=col,
-                message=f"Columna '{col}': {n_unique} valores únicos (alta cardinalidad)",
-                recommendation="Considere agrupar valores o usar hashing si esta es categórica",
+                message=f"Column '{col}': {n_unique} distinct values (high cardinality)",
+                recommendation="Consider grouping the values, or hashing them, if this is a category",
             )
         )
 
@@ -291,8 +291,8 @@ def detect_mixed_types(df: pd.DataFrame) -> tuple[list[str], list[Alert]]:
                         Alert(
                             severity="medium",
                             column=col,
-                            message=f"Columna '{col}' contiene tipos mixtos: {', '.join(sorted(types_in_col))}",
-                            recommendation="Estandarice los tipos o investigue la causa",
+                            message=f"Column '{col}' mixes types: {', '.join(sorted(types_in_col))}",
+                            recommendation="Make the type consistent, or find out why it is not",
                         )
                     )
 
@@ -334,8 +334,8 @@ def detect_numeric_as_text(df: pd.DataFrame) -> tuple[dict[str, int], list[Alert
                         Alert(
                             severity="medium",
                             column=col,
-                            message=f"Columna '{col}': {numeric_count}/{len(non_null)} valores se ven numéricos pero están como texto",
-                            recommendation="Convierta a tipo numérico para análisis correcto",
+                            message=f"Column '{col}': {numeric_count}/{len(non_null)} values are numbers kept as text",
+                            recommendation="Convert the column to a number so it is analysed as one",
                         )
                     )
 

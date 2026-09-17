@@ -467,22 +467,22 @@ class TestOutputCompleteness:
         assert summary["failed_steps"] == []
 
         plan = summary["recommendations"]
-        assert {rec["step"] for rec in plan} == {"descartar", "imputar", "codificar", "escalar"}
-        dropped = {rec["column"] for rec in plan if rec["step"] == "descartar"}
+        assert {rec["step"] for rec in plan} == {"drop", "impute", "encode", "scale"}
+        dropped = {rec["column"] for rec in plan if rec["step"] == "drop"}
         assert {"cliente_id", "comentario"} <= dropped
-        assert [r for r in plan if r["column"] == "edad" and r["step"] == "imputar"]
-        assert [r for r in plan if r["column"] == "region" and r["step"] == "codificar"]
+        assert [r for r in plan if r["column"] == "edad" and r["step"] == "impute"]
+        assert [r for r in plan if r["column"] == "region" and r["step"] == "encode"]
         # A dropped column is not carried into the later steps.
         assert [r for r in plan if r["column"] == "cliente_id"] == [
-            r for r in plan if r["column"] == "cliente_id" and r["step"] == "descartar"
+            r for r in plan if r["column"] == "cliente_id" and r["step"] == "drop"
         ]
 
         table = pd.read_csv(Path(result["output_dir"]) / "tables" / "recommendations.csv")
-        assert set(table["paso"]) == {"descartar", "imputar", "codificar", "escalar"}
-        assert table["evidencia"].notna().all()
+        assert set(table["step"]) == {"drop", "impute", "encode", "scale"}
+        assert table["evidence"].notna().all()
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
-        assert "Plan de Preprocesamiento" in html
+        assert "Preprocessing Plan" in html
         assert html.index('id="preprocesamiento"') > html.index('id="visualizaciones"')  # closes the report
 
     def test_the_plan_keeps_the_target_out_of_the_feature_steps(self, tmp_output_dir):
@@ -512,8 +512,8 @@ class TestOutputCompleteness:
         plan = summary["recommendations"]
         target_rows = [rec for rec in plan if rec["column"] == "abandono"]
         assert len(target_rows) == 1
-        assert target_rows[0]["step"] == "descartar"
-        assert "15 filas" in target_rows[0]["evidence"]
+        assert target_rows[0]["step"] == "drop"
+        assert "15 rows" in target_rows[0]["evidence"]
 
     def test_a_column_without_spread_is_not_reported_as_outliers(self, tmp_output_dir):
         """IQR marked 34% of Order_Details as outliers: discount_pct is 0 on 77% of its rows."""
@@ -539,9 +539,9 @@ class TestOutputCompleteness:
         assert summary["outliers"]["total_outlier_rows"] == 0
 
         table = pd.read_csv(Path(result["output_dir"]) / "tables" / "outlier_summary.csv")
-        iqr_row = table[(table["columna"] == "discount_pct") & (table["metodo"] == "iqr")].iloc[0]
+        iqr_row = table[(table["column"] == "discount_pct") & (table["method"] == "iqr")].iloc[0]
         assert iqr_row["n_outliers"] == 0
-        assert "IQR = 0" in iqr_row["nota"]
+        assert "IQR = 0" in iqr_row["note"]
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
         outliers_section = html[html.index('<section id="outliers">') :]
@@ -581,7 +581,7 @@ class TestOutputCompleteness:
         assert width["histogram_monto.png"] > 1.5 * width["histogram_plazo.png"]  # linear and log side by side
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
-        assert "escala logarítmica" in html
+        assert "log scale" in html
         assert html.count('alt="Pair plot') == 2  # the linear pair plot stays, the log one follows it
 
     def test_a_column_filled_by_zeros_is_drawn_again_without_them(self, tmp_output_dir):
@@ -609,12 +609,14 @@ class TestOutputCompleteness:
         assert split["rest_log"] is True
 
         plots_dir = Path(result["output_dir"]) / "plots"
-        width = {name: mpimg.imread(plots_dir / name).shape[1] for name in ("histogram_gasto.png", "histogram_edad.png")}
+        width = {
+            name: mpimg.imread(plots_dir / name).shape[1] for name in ("histogram_gasto.png", "histogram_edad.png")
+        }
         assert width["histogram_gasto.png"] > 1.5 * width["histogram_edad.png"]  # both panels in one image
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
-        assert "Sin el valor que las llena" in html  # the boxplot note
-        assert "66.7% de las filas" in html
+        assert "Without the value that fills them" in html  # the boxplot note
+        assert "on 66.7% of the rows" in html
 
     def test_pair_plot_follows_the_scatter_plots_and_names_its_group(self, tmp_output_dir):
         """A pair plot of the numeric variables, coloured by the group that separates them, below the scatter plots."""
@@ -642,7 +644,7 @@ class TestOutputCompleteness:
         assert "pair_plot.png" in {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
-        scatter_at = html.index("Scatter Plots (Pares con Mayor Correlación)")
+        scatter_at = html.index("Scatter Plots (Most Correlated Pairs)")
         pair_at = html.index("Pair Plot")
         assert scatter_at < pair_at
         assert "especie" in html[pair_at : pair_at + 2000]
@@ -708,9 +710,9 @@ class TestOutputCompleteness:
         assert "Q3" in forest["note"]
 
         table = pd.read_csv(Path(result["output_dir"]) / "tables" / "outlier_summary.csv")
-        row = table[table["metodo"] == "isolation_forest"].iloc[0]
+        row = table[table["method"] == "isolation_forest"].iloc[0]
         assert row["n_outliers"] == forest["outlier_rows"]
-        assert "Q3" in row["nota"]
+        assert "Q3" in row["note"]
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
         section = html[html.index('<section id="outliers">') :]
@@ -726,7 +728,7 @@ class TestOutputCompleteness:
         results = pipeline.run()
 
         html = Path(results["ventas"]["html_report"]).read_text(encoding="utf-8")
-        assert "Primeras Filas" in html
+        assert "First Rows" in html
         assert '<li><a href="#muestra">' in html  # reachable from the table of contents
 
         preview_at = html.index('<section id="muestra">')
@@ -772,8 +774,8 @@ class TestOutputCompleteness:
         assert "categorical_municipio.png" in plots  # its bars stay
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
-        assert "Proporciones Categóricas (1)" in html
-        assert html.index("Distribuciones Categóricas") < html.index("Proporciones Categóricas")
+        assert "Categorical Shares (1)" in html
+        assert html.index("Categorical Distributions") < html.index("Categorical Shares")
 
     def test_missing_value_placeholders_are_reported_and_not_analysed(self, tmp_output_dir):
         """The "." in sex showed up as a category in the bars and as a 0.3% slice of the pie."""
@@ -792,10 +794,10 @@ class TestOutputCompleteness:
         assert any(a["column"] == "sexo" and "'.'" in a["message"] for a in summary["alerts"])
 
         tables = Path(result["output_dir"]) / "tables"
-        categorical = pd.read_csv(tables / "categorical_stats.csv").set_index("columna")
+        categorical = pd.read_csv(tables / "categorical_stats.csv").set_index("column")
         assert categorical.loc["sexo", "nunique"] == 2
-        missing = pd.read_csv(tables / "missing_per_column.csv").set_index("columna")
-        assert missing.loc["sexo", "pct_faltante"] == pytest.approx(1.0)
+        missing = pd.read_csv(tables / "missing_per_column.csv").set_index("column")
+        assert missing.loc["sexo", "missing_pct"] == pytest.approx(1.0)
 
     def test_target_analysis_adds_grouped_bars_per_categorical(self, tmp_output_dir):
         """With a target, the report compares it against every categorical variable."""
@@ -815,12 +817,12 @@ class TestOutputCompleteness:
         assert "target_bars_enfermo.png" not in plots  # the target against itself says nothing
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
-        assert "Target vs Variables Categóricas" in html
+        assert "Target vs Categorical Columns" in html
         # A p-value below 0.0001 reaches the page as text: a bare < would open a tag.
         assert "<0.0001" not in html
         assert "&lt;0.0001" in html
-        categorical_at = html.index("Distribuciones Categóricas")
-        target_bars_at = html.index("Target vs Variables Categóricas")
+        categorical_at = html.index("Categorical Distributions")
+        target_bars_at = html.index("Target vs Categorical Columns")
         assert categorical_at < target_bars_at
 
     def test_a_regression_target_gets_no_grouped_bars(self, tmp_output_dir):
@@ -854,7 +856,7 @@ class TestOutputCompleteness:
         plots = {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
         assert not any(name.startswith("target_bars_") for name in plots)
         html = Path(result["html_report"]).read_text(encoding="utf-8")
-        assert "Target vs Variables Categóricas" not in html
+        assert "Target vs Categorical Columns" not in html
 
     def test_time_of_day_columns_are_analysed_as_times(self, tmp_output_dir):
         """transaction_time on Vistara was a category with 31702 values: an alert and a useless bar chart."""
@@ -881,8 +883,8 @@ class TestOutputCompleteness:
         assert "categorical_hora.png" not in plots
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
-        assert "Hora del día" in html  # how the quality table names the column's type
-        assert "Distribución por Hora del Día" in html
+        assert "Time of day" in html  # how the quality table names the column's type
+        assert "By Hour of the Day" in html
 
     def test_numeric_id_columns_are_not_analysed_as_variables(self, tmp_output_dir):
         """A key stored as a number used to get a histogram, a boxplot, VIF and scatter plots."""
@@ -956,7 +958,7 @@ class TestOutputCompleteness:
         assert "association_heatmap.png" in plots
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
-        assert "Asociación entre Variables" in html
+        assert "Association Between Columns" in html
 
     def test_quality_table_shows_how_each_column_was_classified(self, tmp_output_dir):
         """The «Calidad de Datos» table must show the dtype and the inferred category per column."""
@@ -975,21 +977,21 @@ class TestOutputCompleteness:
 
         result = results["ventas"]
         html = Path(result["html_report"]).read_text(encoding="utf-8")
-        assert "<th>Tipo de dato</th>" in html
-        assert "<th>Categoría inferida</th>" in html
+        assert "<th>Stored as</th>" in html
+        assert "<th>Read as</th>" in html
         for cell in (
             '<td><code title="Int64">int</code></td>',  # exact pandas dtype kept in the tooltip
             '<td><code title="Float64">float</code></td>',
-            "<td>Numérica discreta</td>",
-            "<td>Numérica continua</td>",
-            "<td>Categórica</td>",
+            "<td>Discrete</td>",
+            "<td>Continuous</td>",
+            "<td>Categorical</td>",
         ):
             assert cell in html
 
         # The CSV twin of that table carries the same two columns.
         csv_text = (Path(result["output_dir"]) / "tables" / "missing_per_column.csv").read_text(encoding="utf-8")
-        assert "columna,tipo_dato,categoria_inferida,pct_faltante" in csv_text
-        assert "quantity,int,Numérica discreta" in csv_text
+        assert "column,dtype,inferred_type,missing_pct" in csv_text
+        assert "quantity,int,Discrete" in csv_text
 
     def test_two_digit_year_dates_are_analysed_as_dates(self, tmp_output_dir):
         """Date Egg (11/11/07) was a category with 50 values: no date statistics, no time series."""
@@ -1027,7 +1029,7 @@ class TestOutputCompleteness:
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
         assert "Boxplots" in html
-        assert "Series Temporales" in html
+        assert "Rows Over Time" in html
         # There must be one embedded <img> per generated plot.
         assert html.count('<img src="data:image/png;base64,') == n_plot_files
 
@@ -1055,11 +1057,11 @@ class TestOutputCompleteness:
         assert summary["target"]["class_balance"]["is_imbalanced"] is True
 
         alert_messages = " ".join(a["message"] for a in summary["alerts"])
-        assert "Desbalance" in alert_messages
-        assert any("fuga" in a["message"].lower() for a in summary["alerts"])
+        assert "Imbalanced classes" in alert_messages
+        assert any("leakage" in a["message"].lower() for a in summary["alerts"])
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
-        assert "Desbalance" in html
+        assert "Imbalanced" in html
 
     def test_html_summary_shows_overall_missing_percentage(self, tmp_output_dir):
         """The «Valores Faltantes» stat box divided an already-percent value by 100 (showed 0.125%)."""
@@ -1100,7 +1102,7 @@ class TestIdentifierColumns:
         assert summary["column_types"]["transaction_id"] == "identifier"
         assert summary["column_types"]["customer_id"] == "identifier"
         assert set(summary["data_quality"]["high_cardinality_columns"]) == {"ciudad"}
-        flagged = [a["column"] for a in summary["alerts"] if "alta cardinalidad" in a["message"]]
+        flagged = [a["column"] for a in summary["alerts"] if "high cardinality" in a["message"]]
         assert flagged == ["ciudad"]
 
 

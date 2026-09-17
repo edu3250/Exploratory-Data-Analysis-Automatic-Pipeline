@@ -67,10 +67,10 @@ def write_result_tables(
 
     written = {
         "numeric_stats": _write_csv(
-            tables_dir, "numeric_stats", pd.DataFrame(_records_from_stats(numeric_stats, "columna"))
+            tables_dir, "numeric_stats", pd.DataFrame(_records_from_stats(numeric_stats, "column"))
         ),
         "categorical_stats": _write_csv(
-            tables_dir, "categorical_stats", pd.DataFrame(_records_from_stats(categorical_stats, "columna"))
+            tables_dir, "categorical_stats", pd.DataFrame(_records_from_stats(categorical_stats, "column"))
         ),
         "missing_per_column": _write_csv(
             tables_dir,
@@ -78,10 +78,10 @@ def write_result_tables(
             pd.DataFrame(
                 [
                     {
-                        "columna": col,
-                        "tipo_dato": dtype_label((column_dtypes or {}).get(col)),
-                        "categoria_inferida": semantic_type_label((column_types or {}).get(col)),
-                        "pct_faltante": pct,
+                        "column": col,
+                        "dtype": dtype_label((column_dtypes or {}).get(col)),
+                        "inferred_type": semantic_type_label((column_types or {}).get(col)),
+                        "missing_pct": pct,
                     }
                     for col, pct in missing_per_column.items()
                 ]
@@ -97,7 +97,7 @@ def write_result_tables(
         "recommendations": _write_csv(tables_dir, "recommendations", _recommendations_table(recommendations)),
     }
 
-    logger.info(f"Tablas CSV escritas en: {tables_dir}")
+    logger.info(f"CSV tables written to: {tables_dir}")
     return written
 
 
@@ -106,10 +106,10 @@ def _recommendations_table(recommendations) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "paso": rec.step,
-                "columna": rec.column if rec.column else "(toda la tabla)",
-                "accion": rec.action,
-                "evidencia": rec.evidence,
+                "step": rec.step,
+                "column": rec.column if rec.column else "(whole table)",
+                "action": rec.action,
+                "evidence": rec.evidence,
             }
             for rec in recommendations or []
         ]
@@ -124,17 +124,17 @@ def _outlier_summary_table(outliers_report) -> pd.DataFrame:
         ("mad_zscore", outliers_report.mad_outliers),
     ):
         for col, info in info_map.items():
-            rows.append({"columna": col, "metodo": method_name, "n_outliers": info.n_outliers, "nota": info.note})
+            rows.append({"column": col, "method": method_name, "n_outliers": info.n_outliers, "note": info.note})
 
     if outliers_report.multivariate_outliers or outliers_report.multivariate_note:
         # All entries share the same multivariate outlier set; one summary row is enough.
         flagged = outliers_report.multivariate_outliers
         rows.append(
             {
-                "columna": "(multivariado)",
-                "metodo": "isolation_forest",
+                "column": "(multivariate)",
+                "method": "isolation_forest",
                 "n_outliers": flagged[0].n_outliers if flagged else 0,
-                "nota": outliers_report.multivariate_note,
+                "note": outliers_report.multivariate_note,
             }
         )
 

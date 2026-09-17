@@ -71,11 +71,11 @@ def encode_plot(plot_path: str) -> str:
 
 # HTML Template
 HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reporte EDA: {{ dataset_name }}</title>
+    <title>EDA report: {{ dataset_name }}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -285,36 +285,36 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <body>
 <div class="container">
     <header>
-        <h1>📊 Análisis Exploratorio de Datos</h1>
+        <h1>📊 Exploratory Data Analysis</h1>
         <p class="subtitle">{{ dataset_name }}</p>
     </header>
 
     <div class="meta">
-        <strong>Generado:</strong> {{ timestamp }} |
-        <strong>Filas:</strong> {{ n_rows }} |
-        <strong>Columnas:</strong> {{ n_cols }} |
-        <strong>ID Correlación:</strong> {{ correlation_id }}
+        <strong>Generated:</strong> {{ timestamp }} |
+        <strong>Rows:</strong> {{ n_rows }} |
+        <strong>Columns:</strong> {{ n_cols }} |
+        <strong>Correlation id:</strong> {{ correlation_id }}
     </div>
 
     <div class="toc">
-        <h3>📑 Tabla de Contenidos</h3>
+        <h3>📑 Contents</h3>
         <ul>
-            <li><a href="#resumen">Resumen Ejecutivo</a></li>
-            <li><a href="#alertas">Alertas y Recomendaciones</a></li>
-            <li><a href="#calidad">Calidad de Datos</a></li>
-            {% if preview_rows %}<li><a href="#muestra">Primeras Filas</a></li>{% endif %}
-            <li><a href="#univariado">Análisis Univariado</a></li>
-            <li><a href="#relaciones">Relaciones entre Variables</a></li>
-            {% if outliers %}<li><a href="#outliers">Análisis de Outliers</a></li>{% endif %}
-            {% if target_analysis %}<li><a href="#target">Análisis de Target</a></li>{% endif %}
-            <li><a href="#visualizaciones">Visualizaciones</a></li>
-            {% if recommendation_steps %}<li><a href="#preprocesamiento">Plan de Preprocesamiento</a></li>{% endif %}
+            <li><a href="#resumen">Summary</a></li>
+            <li><a href="#alertas">Alerts</a></li>
+            <li><a href="#calidad">Data Quality</a></li>
+            {% if preview_rows %}<li><a href="#muestra">First Rows</a></li>{% endif %}
+            <li><a href="#univariado">Column by Column</a></li>
+            <li><a href="#relaciones">Relationships</a></li>
+            {% if outliers %}<li><a href="#outliers">Outliers</a></li>{% endif %}
+            {% if target_analysis %}<li><a href="#target">Target</a></li>{% endif %}
+            <li><a href="#visualizaciones">Charts</a></li>
+            {% if recommendation_steps %}<li><a href="#preprocesamiento">Preprocessing Plan</a></li>{% endif %}
         </ul>
     </div>
 
     {% if alerts %}
     <div class="alerts-section">
-        <h2 id="alertas">⚠️ Alertas y Recomendaciones ({{ alerts | length }})</h2>
+        <h2 id="alertas">⚠️ Alerts ({{ alerts | length }})</h2>
         {% for alert in alerts %}
         <div class="alert {{ alert.severity }}">
             <span class="alert-severity">{{ alert.severity | upper }}</span>
@@ -328,9 +328,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     {% if failed_steps %}
     <div class="alerts-section">
-        <h2>❌ Pasos con Error ({{ failed_steps | length }})</h2>
-        <p>Los siguientes pasos del análisis fallaron y se omitieron; el resto del reporte se generó igualmente.
-           Revise los logs con el ID de correlación <code>{{ correlation_id }}</code> para más detalle.</p>
+        <h2>❌ Failed Steps ({{ failed_steps | length }})</h2>
+        <p>These analysis steps failed and were skipped; the rest of the report was produced anyway.
+           The logs hold the traceback under correlation id <code>{{ correlation_id }}</code>.</p>
         <ul>
             {% for step in failed_steps %}
             <li><code>{{ step }}</code></li>
@@ -340,45 +340,45 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     {% endif %}
 
     <section id="resumen">
-        <h2>📈 Resumen Ejecutivo</h2>
+        <h2>📈 Summary</h2>
         <div>
             <div class="stat-box">
-                <div class="label">Total de Filas</div>
+                <div class="label">Rows</div>
                 <div class="value">{{ n_rows }}</div>
             </div>
             <div class="stat-box">
-                <div class="label">Total de Columnas</div>
+                <div class="label">Columns</div>
                 <div class="value">{{ n_cols }}</div>
             </div>
             <div class="stat-box">
-                <div class="label">Columnas Numéricas</div>
+                <div class="label">Numeric columns</div>
                 <div class="value">{{ numeric_cols_count }}</div>
             </div>
             <div class="stat-box">
-                <div class="label">Columnas Categóricas</div>
+                <div class="label">Categorical columns</div>
                 <div class="value">{{ categorical_cols_count }}</div>
             </div>
             <div class="stat-box">
-                <div class="label">Valores Faltantes</div>
+                <div class="label">Missing values</div>
                 <div class="value">{{ missing_total }}%</div>
             </div>
             <div class="stat-box">
-                <div class="label">Filas Duplicadas</div>
+                <div class="label">Duplicate rows</div>
                 <div class="value">{{ duplicates }}</div>
             </div>
         </div>
     </section>
 
     <section id="calidad">
-        <h2>🔍 Calidad de Datos</h2>
+        <h2>🔍 Data Quality</h2>
 
-        <h3>Tipo y Valores Faltantes por Columna</h3>
-        <p>«Tipo de dato» es cómo quedó almacenada la columna (el tipo exacto de pandas aparece al
-           pasar el cursor); «Categoría inferida» es cómo la clasificó el pipeline, que es lo que
-           decide qué análisis y qué alertas recibe.</p>
+        <h3>Type and Missing Values per Column</h3>
+        <p>"Stored as" is how the column ended up in memory (hover for the exact pandas dtype);
+           "Read as" is how the pipeline classified it, and that is what decides which analyses and
+           which alerts it receives.</p>
         <table>
             <thead>
-                <tr><th>Columna</th><th>Tipo de dato</th><th>Categoría inferida</th><th>Faltantes (%)</th></tr>
+                <tr><th>Column</th><th>Stored as</th><th>Read as</th><th>Missing (%)</th></tr>
             </thead>
             <tbody>
                 {% for row in column_quality %}
@@ -393,8 +393,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </table>
 
         {% if constant_columns %}
-        <h3>Columnas Constantes</h3>
-        <p>Las siguientes columnas tienen un único valor y pueden eliminarse:</p>
+        <h3>Constant Columns</h3>
+        <p>These columns hold a single value and can be dropped:</p>
         <ul>
             {% for col in constant_columns %}
             <li><code>{{ col }}</code></li>
@@ -403,11 +403,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if quasi_constant_columns %}
-        <h3>Columnas Quasi-Constantes</h3>
-        <p>Las siguientes columnas están dominadas por un único valor:</p>
+        <h3>Almost Constant Columns</h3>
+        <p>These columns are dominated by one value:</p>
         <table>
             <thead>
-                <tr><th>Columna</th><th>% Valor Más Frecuente</th></tr>
+                <tr><th>Column</th><th>Share of its most common value</th></tr>
             </thead>
             <tbody>
                 {% for col, pct in quasi_constant_columns.items() %}
@@ -421,8 +421,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if ignored_columns %}
-        <h3>Columnas Ignoradas (por configuración)</h3>
-        <p>Excluidas de todo el análisis por <code>column_types.ignore</code>:</p>
+        <h3>Ignored Columns (by configuration)</h3>
+        <p>Left out of every analysis by <code>column_types.ignore</code>:</p>
         <ul>
             {% for col in ignored_columns %}
             <li><code>{{ col }}</code></li>
@@ -433,9 +433,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     {% if preview_rows %}
     <section id="muestra">
-        <h2>🧾 Primeras Filas</h2>
-        <p>Las primeras {{ preview_rows | length }} filas del dataset, tal como se leyeron. Los valores
-           faltantes aparecen como «—» y los textos muy largos se recortan.</p>
+        <h2>🧾 First Rows</h2>
+        <p>The first {{ preview_rows | length }} rows as they were read. A missing value shows as "—"
+           and very long text is cut.</p>
         <div style="overflow-x: auto;">
             <table>
                 <thead>
@@ -452,15 +452,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     {% endif %}
 
     <section id="univariado">
-        <h2>📊 Análisis Univariado</h2>
+        <h2>📊 Column by Column</h2>
 
         {% if numeric_stats %}
-        <h3>Columnas Numéricas</h3>
+        <h3>Numeric Columns</h3>
         <table>
             <thead>
                 <tr>
-                    <th>Columna</th><th>Media</th><th>Mediana</th><th>Desv.Est.</th>
-                    <th>Min</th><th>Max</th><th>Skewness</th><th>Nulos</th>
+                    <th>Column</th><th>Mean</th><th>Median</th><th>Std. dev.</th>
+                    <th>Min</th><th>Max</th><th>Skewness</th><th>Missing</th>
                 </tr>
             </thead>
             <tbody>
@@ -481,10 +481,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if categorical_stats %}
-        <h3>Columnas Categóricas</h3>
+        <h3>Categorical Columns</h3>
         <table>
             <thead>
-                <tr><th>Columna</th><th>Únicos</th><th>Modo</th><th>Nulos</th></tr>
+                <tr><th>Column</th><th>Distinct</th><th>Most common</th><th>Missing</th></tr>
             </thead>
             <tbody>
                 {% for col, stats in categorical_stats.items() %}
@@ -500,10 +500,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if time_stats %}
-        <h3>Columnas de Hora del Día</h3>
+        <h3>Time of Day Columns</h3>
         <table>
             <thead>
-                <tr><th>Columna</th><th>Únicos</th><th>Primera</th><th>Última</th><th>Hora pico</th><th>Nulos</th></tr>
+                <tr><th>Column</th><th>Distinct</th><th>Earliest</th><th>Latest</th><th>Peak hour</th><th>Missing</th></tr>
             </thead>
             <tbody>
                 {% for col, stats in time_stats.items() %}
@@ -512,7 +512,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     <td>{{ stats.nunique }}</td>
                     <td>{{ stats.earliest }}</td>
                     <td>{{ stats.latest }}</td>
-                    <td>{% if stats.peak_hour is not none %}{{ "%02d" | format(stats.peak_hour) }}:00 ({{ stats.hour_counts[stats.peak_hour] }} filas){% else %}—{% endif %}</td>
+                    <td>{% if stats.peak_hour is not none %}{{ "%02d" | format(stats.peak_hour) }}:00 ({{ stats.hour_counts[stats.peak_hour] }} rows){% else %}—{% endif %}</td>
                     <td>{{ stats.missing }}</td>
                 </tr>
                 {% endfor %}
@@ -523,13 +523,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     {% if correlations %}
     <section id="relaciones">
-        <h2>🔗 Relaciones entre Variables</h2>
+        <h2>🔗 Relationships</h2>
 
-        <h3>Correlaciones Significativas (Pearson)</h3>
+        <h3>Significant Correlations (Pearson)</h3>
         {% if numeric_pairs %}
         <table>
             <thead>
-                <tr><th>Variable 1</th><th>Variable 2</th><th>Correlación</th><th>P-Value</th></tr>
+                <tr><th>Column 1</th><th>Column 2</th><th>Correlation</th><th>P-value</th></tr>
             </thead>
             <tbody>
                 {% for pair in numeric_pairs[:20] %}
@@ -543,14 +543,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </tbody>
         </table>
         {% else %}
-        <p class="no-data">No se encontraron correlaciones significativas.</p>
+        <p class="no-data">No significant correlation was found.</p>
         {% endif %}
 
         {% if categorical_pairs %}
-        <h3>Asociaciones Categóricas (Cramér's V)</h3>
+        <h3>Categorical Associations (Cramér's V)</h3>
         <table>
             <thead>
-                <tr><th>Variable 1</th><th>Variable 2</th><th>Cramér's V</th></tr>
+                <tr><th>Column 1</th><th>Column 2</th><th>Cramér's V</th></tr>
             </thead>
             <tbody>
                 {% for pair in categorical_pairs[:20] %}
@@ -568,33 +568,34 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     {% if outliers %}
     <section id="outliers">
-        <h2>🎯 Análisis de Outliers</h2>
-        <p>Se detectaron outliers usando IQR, MAD (z-score robusto) e Isolation Forest.</p>
-        <p><strong>Total de filas con al menos un outlier detectado:</strong> {{ outliers.outlier_indices_union | length }}</p>
+        <h2>🎯 Outliers</h2>
+        <p>Found with three methods: IQR, MAD (a robust z-score) and a multivariate Isolation Forest.</p>
+        <p><strong>Rows flagged by at least one of them:</strong> {{ outliers.outlier_indices_union | length }}</p>
         {% if outliers.multivariate_note %}
         <p><strong>Isolation Forest:</strong>
-           {{ outliers.multivariate_outliers[0].n_outliers if outliers.multivariate_outliers else 0 }} filas.
+           {{ outliers.multivariate_outliers[0].n_outliers if outliers.multivariate_outliers else 0 }} rows.
            {{ outliers.multivariate_note }}</p>
         {% endif %}
         {% set no_spread = outliers.iqr_outliers.values() | selectattr("note") | map(attribute="column") | list %}
         {% if no_spread %}
-        <p><strong>IQR no aplicado:</strong> {{ no_spread | join(", ") }}. Al menos la mitad de sus valores son iguales,
-           así que el IQR vale 0 y cualquier otro valor saldría como atípico.</p>
+        <p><strong>IQR measured differently:</strong> {{ no_spread | join(", ") }}. One repeated value takes over
+           their quartiles, so the usual fence would measure that value instead of the spread. The note beside each
+           column in <code>tables/outlier_summary.csv</code> says which value and how much of the column it is.</p>
         {% endif %}
     </section>
     {% endif %}
 
     {% if target_analysis %}
     <section id="target">
-        <h2>🎯 Análisis de Variable Target</h2>
+        <h2>🎯 Target</h2>
         <p><strong>Target:</strong> {{ target_analysis.target_column }} ({{ target_analysis.target_type }})</p>
-        <p><strong>Muestras:</strong> {{ target_analysis.n_samples }} | <strong>Faltantes:</strong> {{ target_analysis.n_missing }}</p>
+        <p><strong>Rows:</strong> {{ target_analysis.n_samples }} | <strong>Missing:</strong> {{ target_analysis.n_missing }}</p>
 
         {% if target_analysis.class_balance %}
-        <h3>Distribución de Clases</h3>
+        <h3>Class Distribution</h3>
         <table>
             <thead>
-                <tr><th>Clase</th><th>Frecuencia</th><th>Porcentaje</th></tr>
+                <tr><th>Class</th><th>Rows</th><th>Share</th></tr>
             </thead>
             <tbody>
                 {% for cls, count in target_analysis.class_balance.class_counts.items() %}
@@ -607,15 +608,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </tbody>
         </table>
         {% if target_analysis.class_balance.is_imbalanced %}
-        <p><strong>⚠️ Desbalance detectado:</strong> Ratio {{ "%.2f" | format(target_analysis.class_balance.imbalance_ratio) }}</p>
+        <p><strong>⚠️ Imbalanced:</strong> ratio {{ "%.2f" | format(target_analysis.class_balance.imbalance_ratio) }}</p>
         {% endif %}
         {% endif %}
 
         {% if target_analysis.feature_relationships %}
-        <h3>Features más relacionadas con Target</h3>
+        <h3>Columns Most Related to the Target</h3>
         <table>
             <thead>
-                <tr><th>Feature</th><th>Test</th><th>P-Value</th><th>Efecto</th></tr>
+                <tr><th>Column</th><th>Test</th><th>P-value</th><th>Effect</th></tr>
             </thead>
             <tbody>
                 {% for rel in target_analysis.feature_relationships[:20] %}
@@ -642,50 +643,50 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     {% endif %}
 
     <section id="visualizaciones">
-        <h2>📸 Visualizaciones</h2>
+        <h2>📸 Charts</h2>
 
         {% if plots.correlation %}
-        <h3>Matriz de Correlación</h3>
+        <h3>Correlation Matrix</h3>
         <div class="plot-container">
             <img src="data:image/png;base64,{{ plots.correlation[0] }}" alt="Correlation Matrix">
         </div>
         {% endif %}
 
         {% if plots.association %}
-        <h3>Asociación entre Variables (incluye categóricas)</h3>
-        <p>Cada celda usa la medida que corresponde al par: Pearson entre numéricas (de -1 a 1, con
-           signo), Cramér's V entre categóricas y razón de correlación (eta) entre una categórica y
-           una numérica; estas dos van de 0 a 1 y no tienen signo.</p>
+        <h3>Association Between Columns (categorical ones included)</h3>
+        <p>Each cell uses the measure that fits the pair: Pearson between two numbers (-1 to 1, signed),
+           Cramér's V between two categories, and the correlation ratio (eta) between a category and a
+           number. The last two run from 0 to 1 and carry no sign.</p>
         <div class="plot-container">
             <img src="data:image/png;base64,{{ plots.association[0] }}" alt="Association Matrix">
         </div>
         {% endif %}
 
         {% if plots.missing %}
-        <h3>Mapa de Valores Faltantes</h3>
+        <h3>Missing Values</h3>
         <div class="plot-container">
             <img src="data:image/png;base64,{{ plots.missing[0] }}" alt="Missing Values Matrix">
         </div>
         {% endif %}
 
         {% if plots.histograms %}
-        <h3>Distribuciones Numéricas ({{ plots.histograms | length }})</h3>
+        <h3>Numeric Distributions ({{ plots.histograms | length }})</h3>
         {% if floor_split_columns %}
         <p style="color: #555; margin-top: -8px;">
-            Dibujadas otra vez sin el valor que las llena, al lado de la columna completa:
+            Drawn a second time without the value that fills them, beside the whole column:
             {% for col, check in floor_split_columns.items() %}<strong>{{ col }}</strong>
-            ({{ "%g" | format(check.floor) }} en el {{ "%.1f" | format(check.floor_pct) }}% de las filas){% if not loop.last %}, {% endif %}{% endfor %}.
-            Un valor repetido en el fondo de la columna aplasta el resto, y cuando ese valor es 0 la escala
-            logarítmica no puede arreglarlo: dejaría fuera la mayoría de las filas. Se hace cuando ese valor
-            ocupa al menos el {{ "%g" | format(floor_split_min_share) }}% de las filas, lo que queda tiene más
-            de {{ floor_split_min_distinct }} valores distintos y el gráfico completo está aplastado.
+            ({{ "%g" | format(check.floor) }} on {{ "%.1f" | format(check.floor_pct) }}% of the rows){% if not loop.last %}, {% endif %}{% endfor %}.
+            A value repeated at the bottom of a column flattens everything else, and when that value is 0 a
+            log scale cannot fix it: it would leave most of the rows out. This is done when that value fills
+            at least {{ "%g" | format(floor_split_min_share) }}% of the rows, what is left holds more than
+            {{ floor_split_min_distinct }} distinct values, and the chart of the whole column is squeezed.
         </p>
         {% endif %}
         {% if log_scale_columns %}
         <p style="color: #555; margin-top: -8px;">
-            Con escala logarítmica a la derecha de la lineal: <strong>{{ log_scale_columns | join(", ") }}</strong>.
-            Se usa cuando el 90 % central de las filas ocupa menos del 30 % del eje, el logaritmo al menos duplica
-            ese espacio y como mucho el 5 % de los valores son 0 o negativos (esos quedan fuera del panel logarítmico).
+            With a log scale to the right of the linear one: <strong>{{ log_scale_columns | join(", ") }}</strong>.
+            Used when the middle 90% of the rows takes less than 30% of the axis, the log at least doubles that
+            span, and at most 5% of the values are 0 or negative (those are left out of the log panel).
         </p>
         {% endif %}
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
@@ -701,13 +702,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <h3>Boxplots ({{ plots.boxplots | length }})</h3>
         {% if floor_split_columns %}
         <p style="color: #555; margin-top: -8px;">
-            Sin el valor que las llena, al lado de la columna completa:
+            Without the value that fills them, beside the whole column:
             <strong>{{ floor_split_columns | join(", ") }}</strong>.
         </p>
         {% endif %}
         {% if log_scale_columns %}
         <p style="color: #555; margin-top: -8px;">
-            Con escala logarítmica a la derecha de la lineal: <strong>{{ log_scale_columns | join(", ") }}</strong>.
+            With a log scale to the right of the linear one: <strong>{{ log_scale_columns | join(", ") }}</strong>.
         </p>
         {% endif %}
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
@@ -720,7 +721,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if plots.categorical %}
-        <h3>Distribuciones Categóricas ({{ plots.categorical | length }})</h3>
+        <h3>Categorical Distributions ({{ plots.categorical | length }})</h3>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             {% for img in plots.categorical %}
             <div class="plot-container">
@@ -731,10 +732,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if plots.pie %}
-        <h3>Proporciones Categóricas ({{ plots.pie | length }})</h3>
+        <h3>Categorical Shares ({{ plots.pie | length }})</h3>
         <p style="color: #555; margin-top: -8px;">
-            Porcentaje de cada categoría sobre las filas que tienen valor. Solo para columnas con hasta
-            {{ pie_max_categories }} categorías: con más, las porciones ya no se distinguen y queda el gráfico de barras.
+            Each category as a share of the rows that have a value. Only for columns with up to
+            {{ pie_max_categories }} categories: above that the slices stop being distinguishable and the bar chart is enough.
         </p>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             {% for img in plots.pie %}
@@ -746,11 +747,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if plots.target_categorical %}
-        <h3>Target vs Variables Categóricas ({{ plots.target_categorical | length }})</h3>
+        <h3>Target vs Categorical Columns ({{ plots.target_categorical | length }})</h3>
         <p style="color: #555; margin-top: -8px;">
-            Barras agrupadas de cada variable categórica frente al target
+            Grouped bars of each categorical column against the target
             {% if target_analysis %}<strong>{{ target_analysis.target_column }}</strong>{% endif %}.
-            Cada etiqueta es el porcentaje sobre el total de filas del gráfico, así que las barras suman 100%.
+            Every label is a share of the chart total, so the bars add up to 100%.
         </p>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             {% for img in plots.target_categorical %}
@@ -762,10 +763,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if plots.scatter %}
-        <h3>Scatter Plots (Pares con Mayor Correlación)</h3>
+        <h3>Scatter Plots (Most Correlated Pairs)</h3>
         {% if log_scale_columns %}
         <p style="color: #555; margin-top: -8px;">
-            Con escala logarítmica a la derecha de la lineal: <strong>{{ log_scale_columns | join(", ") }}</strong>.
+            With a log scale to the right of the linear one: <strong>{{ log_scale_columns | join(", ") }}</strong>.
         </p>
         {% endif %}
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
@@ -778,23 +779,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if plots.pair_plot and pair_plot %}
-        <h3>Pair Plot: Relaciones entre Variables Numéricas</h3>
+        <h3>Pair Plot: How the Numeric Columns Relate</h3>
         <p style="color: #555; margin-top: -8px;">
-            Cada panel cruza dos de estas variables: <strong>{{ pair_plot.columns | join(", ") }}</strong>.
-            En la diagonal, la distribución de cada una{% if pair_plot.hue %} por grupo{% endif %}.
+            Each panel crosses two of these columns: <strong>{{ pair_plot.columns | join(", ") }}</strong>.
+            The diagonal holds each one's distribution{% if pair_plot.hue %}, by group{% endif %}.
             {% if pair_plot.hue_reason == "target" %}
-            Coloreado por el target <strong>{{ pair_plot.hue }}</strong>.
+            Coloured by the target <strong>{{ pair_plot.hue }}</strong>.
             {% elif pair_plot.hue %}
-            Coloreado por <strong>{{ pair_plot.hue }}</strong>, la variable categórica que más separa estas columnas
-            (η medio {{ "%.2f" | format(pair_plot.hue_eta) }}).
+            Coloured by <strong>{{ pair_plot.hue }}</strong>, the categorical column that separates these the most
+            (mean η {{ "%.2f" | format(pair_plot.hue_eta) }}).
             {% elif pair_plot.best_group %}
-            Sin colorear: la variable categórica que más separa estas columnas, <strong>{{ pair_plot.best_group }}</strong>,
-            solo llega a un η medio de {{ "%.2f" | format(pair_plot.best_eta) }} (se colorea desde {{ "%.2f" | format(pair_plot_min_eta) }}).
+            Not coloured: the categorical column that separates these the most, <strong>{{ pair_plot.best_group }}</strong>,
+            only reaches a mean η of {{ "%.2f" | format(pair_plot.best_eta) }} (colouring starts at {{ "%.2f" | format(pair_plot_min_eta) }}).
             {% else %}
-            Sin colorear: no hay una variable categórica de 2 a 6 grupos con suficientes filas en cada uno.
+            Not coloured: no categorical column has 2 to 6 groups with enough rows in each.
             {% endif %}
             {% if pair_plot.rows_plotted < pair_plot.rows_available %}
-            Muestra aleatoria de {{ pair_plot.rows_plotted }} de las {{ pair_plot.rows_available }} filas completas.
+            A fixed random sample of {{ pair_plot.rows_plotted }} of the {{ pair_plot.rows_available }} complete rows.
             {% endif %}
         </p>
         <div class="plot-container">
@@ -802,9 +803,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
         {% if plots.pair_plot_log %}
         <p style="color: #555;">
-            El mismo pair plot con escala logarítmica (log10) en
+            The same pair plot with a log scale (log10) on
             <strong>{% for col in pair_plot.columns if col in log_scale_columns %}{{ col }}{% if not loop.last %}, {% endif %}{% endfor %}</strong>,
-            para compararlo con el de arriba. Se omiten las filas con valores 0 o negativos en esas columnas.
+            to compare against the one above. Rows with 0 or negative values in those columns are left out.
         </p>
         <div class="plot-container">
             <img src="data:image/png;base64,{{ plots.pair_plot_log[0] }}" alt="Pair plot (log10)">
@@ -813,7 +814,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if plots.timeseries %}
-        <h3>Series Temporales ({{ plots.timeseries | length }})</h3>
+        <h3>Rows Over Time ({{ plots.timeseries | length }})</h3>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             {% for img in plots.timeseries %}
             <div class="plot-container">
@@ -824,7 +825,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if plots.time_of_day %}
-        <h3>Distribución por Hora del Día ({{ plots.time_of_day | length }})</h3>
+        <h3>By Hour of the Day ({{ plots.time_of_day | length }})</h3>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             {% for img in plots.time_of_day %}
             <div class="plot-container">
@@ -837,24 +838,24 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     {% if recommendation_steps %}
     <section id="preprocesamiento">
-        <h2>🧭 Plan de Preprocesamiento ({{ recommendations | length }})</h2>
-        <p>Los pasos en el orden en que se aplican, y al lado de cada línea la medición que la produjo,
-           para poder comprobarla en vez de creerla.</p>
-        <p><strong>Aquí solo está lo que los datos deciden por sí solos.</strong> Quedan fuera dos cosas
-           que no se pueden leer de la tabla: si una variable categórica es <em>ordinal</em> y en qué orden
-           van sus niveles, y si su modelo necesita escalado (un árbol no lo necesita; una distancia o una
-           penalización sí). El plan decide sobre las columnas numéricas y categóricas; las fechas, las
-           horas y el texto libre solo aparecen si guardan números como texto.</p>
+        <h2>🧭 Preprocessing Plan ({{ recommendations | length }})</h2>
+        <p>The steps in the order they are applied, and next to every line the measurement that produced
+           it, so it can be checked instead of believed.</p>
+        <p><strong>Only what the data settles on its own is here.</strong> Two things are left out, because
+           they cannot be read from the table: whether a categorical column is <em>ordinal</em> and in what
+           order its levels go, and whether your model needs scaling at all (a tree does not; a distance or
+           a penalty does). The plan decides about the numeric and categorical columns; dates, times and free
+           text only appear when they hold numbers as text.</p>
         {% for step, label, rows in recommendation_steps %}
         <h3>{{ label }} ({{ rows | length }})</h3>
         <table>
             <thead>
-                <tr><th style="width: 18%;">Columna</th><th style="width: 34%;">Acción</th><th>Por qué (medido)</th></tr>
+                <tr><th style="width: 18%;">Column</th><th style="width: 34%;">Action</th><th>Why (measured)</th></tr>
             </thead>
             <tbody>
                 {% for rec in rows %}
                 <tr>
-                    <td>{% if rec.column %}<code>{{ rec.column }}</code>{% else %}<em>toda la tabla</em>{% endif %}</td>
+                    <td>{% if rec.column %}<code>{{ rec.column }}</code>{% else %}<em>whole table</em>{% endif %}</td>
                     <td>{{ rec.action }}</td>
                     <td style="color: #555;">{{ rec.evidence }}</td>
                 </tr>
@@ -866,7 +867,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     {% endif %}
 
     <footer>
-        <p>Generado por EDA Pipeline v0.1.0 | Reporte Auto-Contenido (Offline-Ready)</p>
+        <p>Generated by EDA Pipeline v0.1.0 | self-contained report, works offline</p>
     </footer>
 </div>
 </body>

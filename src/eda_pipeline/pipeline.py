@@ -45,14 +45,13 @@ class TargetColumnNotFoundError(ValueError):
 
 
 def _missing_target_message(target_column: str, available_columns: list[str]) -> str:
-    """Build a Spanish error message for a missing target column, with fuzzy-match suggestions."""
+    """Build the error message for a missing target column, with fuzzy-match suggestions."""
     suggestions = difflib.get_close_matches(target_column, available_columns, n=3)
     message = (
-        f"La columna target '{target_column}' no existe en el dataset. "
-        f"Columnas disponibles: {', '.join(available_columns)}."
+        f"The target column '{target_column}' is not in the dataset. Available columns: {', '.join(available_columns)}."
     )
     if suggestions:
-        message += f" ¿Quiso decir: {', '.join(suggestions)}?"
+        message += f" Did you mean: {', '.join(suggestions)}?"
     return message
 
 
@@ -67,10 +66,10 @@ def _build_target_alerts(target_report) -> list[Alert]:
                 severity="high",
                 column=target_report.target_column,
                 message=(
-                    f"Desbalance de clases en target '{target_report.target_column}': "
-                    f"la clase mayoritaria representa {majority_pct:.1f}% de las muestras."
+                    f"Imbalanced classes in target '{target_report.target_column}': "
+                    f"the majority class covers {majority_pct:.1f}% of the rows."
                 ),
-                recommendation="Considere resampling (SMOTE, undersampling) o métricas robustas al desbalance (F1, AUC-PR).",
+                recommendation="Consider resampling (SMOTE, undersampling) or metrics that survive imbalance (F1, AUC-PR).",
             )
         )
     for leak_message in target_report.leakage_alerts:
@@ -79,7 +78,7 @@ def _build_target_alerts(target_report) -> list[Alert]:
                 severity="high",
                 column=target_report.target_column,
                 message=leak_message,
-                recommendation="Revise si esta variable debería excluirse del modelo por fuga de información.",
+                recommendation="Check whether this column should be kept out of the model as leakage.",
             )
         )
     return alerts
@@ -95,8 +94,8 @@ def _placeholder_alerts(missing_placeholders: dict[str, dict[str, int]]) -> list
             Alert(
                 severity="low",
                 column=column,
-                message=f"Columna '{column}': {total} valor(es) que solo son signos se tomaron como faltantes: {values}",
-                recommendation="Revise el origen de los datos: esos marcadores suelen indicar un valor no registrado.",
+                message=f"Column '{column}': {total} punctuation-only value(s) were read as missing: {values}",
+                recommendation="Check where the data came from: those markers usually stand for a value nobody recorded.",
             )
         )
     return alerts
@@ -207,7 +206,7 @@ class EDAPipeline:
         # One folder for the whole run: a folder of eight files used to scatter eight timestamped
         # report folders across the output directory, mixed with those of every previous run.
         self.batch_output_dir = Path(self.config.output_dir) / self._batch_run_folder_name(folder_path, _timestamp())
-        self.logger.info(f"Los reportes de este lote se guardarán en: {self.batch_output_dir}")
+        self.logger.info(f"This batch will write its reports to: {self.batch_output_dir}")
 
         stem_counts = Counter(f.stem for f in files)
         all_results = {}
@@ -309,7 +308,7 @@ class EDAPipeline:
             if self.config.strict_mode:
                 raise
             self.logger.error(
-                f"Paso '{step_name}' falló (correlation_id={self.correlation_id}): {e}\n{traceback.format_exc()}"
+                f"Step '{step_name}' failed (correlation_id={self.correlation_id}): {e}\n{traceback.format_exc()}"
             )
             step_failures.append(step_name)
             return default
@@ -352,7 +351,7 @@ class EDAPipeline:
                 severity="medium",
                 column=target_column,
                 message=message,
-                recommendation="Verifique el nombre de la columna target o quite la opción --target.",
+                recommendation="Check the target column name, or drop the --target option.",
             )
             target_column = None
 

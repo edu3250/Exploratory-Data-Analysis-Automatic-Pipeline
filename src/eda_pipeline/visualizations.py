@@ -220,16 +220,16 @@ def log_scale_columns(df: pd.DataFrame, column_types: dict[str, str]) -> dict[st
 
 def _floor_panel_title(check: FloorSplitCheck) -> str:
     """What the right panel of a split chart is showing."""
-    scale = ", escala logarítmica" if check.rest_log else ""
-    return f"Sin el valor {check.floor:g}: {check.rest_count} filas{scale}"
+    scale = ", log scale" if check.rest_log else ""
+    return f"Without the value {check.floor:g}: {check.rest_count} rows{scale}"
 
 
 def _floor_figure_note(check: FloorSplitCheck, name: object) -> str:
-    return f"{name}: el valor {check.floor:g} ocupa el {check.floor_pct:.1f}% de las filas ({check.floor_count})"
+    return f"{name}: the value {check.floor:g} fills {check.floor_pct:.1f}% of the rows ({check.floor_count})"
 
 
 def _log_panel_title(dropped: int) -> str:
-    return "Escala logarítmica" + (f" ({dropped} valores ≤ 0 fuera)" if dropped else "")
+    return "Log scale" + (f" ({dropped} values ≤ 0 left out)" if dropped else "")
 
 
 @safe_plot
@@ -248,30 +248,30 @@ def plot_histogram(series: pd.Series, output_path: Path, log_scale: bool = False
     if floor_split is not None:
         fig, (whole, rest_ax) = plt.subplots(1, 2, figsize=(16, 6))
         _draw_histogram(whole, valid)
-        whole.set_title("Columna completa")
+        whole.set_title("Whole column")
         whole.set_xlabel(series.name)
         rest = valid[valid > floor_split.floor].astype(float)
         sns.histplot(rest, kde=True, ax=rest_ax, bins=30, log_scale=floor_split.rest_log)
         rest_ax.set_title(_floor_panel_title(floor_split))
         rest_ax.set_xlabel(f"{series.name} > {floor_split.floor:g}")
-        rest_ax.set_ylabel("Frecuencia")
+        rest_ax.set_ylabel("Frequency")
         fig.suptitle(_floor_figure_note(floor_split, series.name))
     elif not log_scale:
         fig, ax = plt.subplots(figsize=(10, 6))
         _draw_histogram(ax, valid)
-        ax.set_title(f"Distribución: {series.name}")
+        ax.set_title(f"Distribution: {series.name}")
         ax.set_xlabel(series.name)
     else:
         fig, (linear, log) = plt.subplots(1, 2, figsize=(16, 6))
         _draw_histogram(linear, valid)
-        linear.set_title("Escala lineal")
+        linear.set_title("Linear scale")
         linear.set_xlabel(series.name)
         positive = valid[valid > 0].astype(float)
         sns.histplot(positive, kde=True, ax=log, bins=30, log_scale=True)
         log.set_title(_log_panel_title(len(valid) - len(positive)))
         log.set_xlabel(f"{series.name} (log)")
-        log.set_ylabel("Frecuencia")
-        fig.suptitle(f"Distribución: {series.name}")
+        log.set_ylabel("Frequency")
+        fig.suptitle(f"Distribution: {series.name}")
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     return True
@@ -282,7 +282,7 @@ def _draw_histogram(ax, valid: pd.Series) -> None:
         sns.histplot(valid, kde=True, ax=ax, bins=30)
     else:
         ax.hist(valid, bins=1)
-    ax.set_ylabel("Frecuencia")
+    ax.set_ylabel("Frequency")
 
 
 @safe_plot
@@ -303,7 +303,7 @@ def plot_boxplot(series: pd.Series, output_path: Path, log_scale: bool = False, 
         with _suppress_seaborn_boxplot_warning():
             sns.boxplot(y=valid, ax=whole)
             sns.boxplot(y=rest, ax=rest_ax, log_scale=floor_split.rest_log)
-        whole.set_title("Columna completa")
+        whole.set_title("Whole column")
         whole.set_ylabel(series.name)
         rest_ax.set_title(_floor_panel_title(floor_split))
         rest_ax.set_ylabel(f"{series.name} > {floor_split.floor:g}")
@@ -320,7 +320,7 @@ def plot_boxplot(series: pd.Series, output_path: Path, log_scale: bool = False, 
         with _suppress_seaborn_boxplot_warning():
             sns.boxplot(y=valid, ax=linear)
             sns.boxplot(y=positive, ax=log, log_scale=True)
-        linear.set_title("Escala lineal")
+        linear.set_title("Linear scale")
         linear.set_ylabel(series.name)
         log.set_title(_log_panel_title(len(valid) - len(positive)))
         log.set_ylabel(f"{series.name} (log)")
@@ -341,14 +341,14 @@ def plot_categorical(series: pd.Series, output_path: Path, top_n: int = 20) -> b
     if len(counts) > top_n:
         top_counts = counts.iloc[:top_n]
         other_count = counts.iloc[top_n:].sum()
-        top_counts["Otros"] = other_count
+        top_counts["Other"] = other_count
         counts = top_counts
 
     fig, ax = plt.subplots(figsize=(12, 6))
     counts.plot(kind="bar", ax=ax)
-    ax.set_title(f"Categorías: {series.name}")
+    ax.set_title(f"Categories: {series.name}")
     ax.set_xlabel(series.name)
-    ax.set_ylabel("Frecuencia")
+    ax.set_ylabel("Frequency")
     ax.tick_params(axis="x", rotation=45)
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
@@ -434,7 +434,7 @@ def plot_pie_chart(series: pd.Series, output_path: Path) -> bool:
         bbox_to_anchor=(1.0, 0.5),
         frameon=False,
     )
-    ax.set_title(f"Proporción: {series.name} (n = {int(counts.sum())})")
+    ax.set_title(f"Share: {series.name} (n = {int(counts.sum())})")
     ax.axis("equal")
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
@@ -454,9 +454,9 @@ def plot_correlation_heatmap(corr_matrix: pd.DataFrame, output_path: Path, max_s
     fig, ax = plt.subplots(figsize=(12, 10))
     with _suppress_seaborn_heatmap_warning():
         sns.heatmap(
-            corr_matrix, annot=False, cmap="coolwarm", center=0, ax=ax, square=True, cbar_kws={"label": "Correlación"}
+            corr_matrix, annot=False, cmap="coolwarm", center=0, ax=ax, square=True, cbar_kws={"label": "Correlation"}
         )
-    ax.set_title("Matriz de Correlación Pearson")
+    ax.set_title("Pearson correlation matrix")
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     return True
@@ -490,9 +490,9 @@ def plot_association_heatmap(assoc_matrix: pd.DataFrame, output_path: Path, max_
             vmax=1,
             ax=ax,
             square=True,
-            cbar_kws={"label": "Asociación"},
+            cbar_kws={"label": "Association"},
         )
-    ax.set_title("Asociación entre Variables (Pearson · Cramér's V · eta)")
+    ax.set_title("Association between columns (Pearson · Cramér's V · eta)")
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     return True
@@ -511,9 +511,9 @@ def plot_missing_matrix(df: pd.DataFrame, output_path: Path) -> bool:
     missing_matrix = df.isnull().astype(int)
     fig, ax = plt.subplots(figsize=(14, 8))
     with _suppress_seaborn_heatmap_warning():
-        sns.heatmap(missing_matrix, cbar=True, ax=ax, yticklabels=False, cbar_kws={"label": "Faltante (1=sí)"})
-    ax.set_title("Mapa de Valores Faltantes")
-    ax.set_xlabel("Columnas")
+        sns.heatmap(missing_matrix, cbar=True, ax=ax, yticklabels=False, cbar_kws={"label": "Missing (1 = yes)"})
+    ax.set_title("Missing values")
+    ax.set_xlabel("Columns")
     ax.set_ylabel("Filas (muestra)")
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
@@ -574,7 +574,7 @@ def plot_scatter(
     else:
         fig, (linear, log) = plt.subplots(1, 2, figsize=(16, 6))
         linear.scatter(valid["x"], valid["y"], alpha=0.6, s=20)
-        linear.set_title("Escala lineal")
+        linear.set_title("Linear scale")
         linear.set_xlabel(x.name)
         linear.set_ylabel(y.name)
         kept = valid[((valid["x"] > 0) | (not log_x)) & ((valid["y"] > 0) | (not log_y))]
@@ -596,7 +596,7 @@ def plot_scatter(
 # On the datasets in data/raw that gives days for a 16-day span, weeks for a year (Sales_Receipts),
 # weeks for the two seasons of Date Egg and months for the five years of customer_since.
 TIME_SERIES_MAX_PERIODS = 120
-_TIME_SERIES_PERIODS = (("D", "día", 1.0), ("W", "semana", 7.0), ("M", "mes", 30.44), ("Y", "año", 365.25))
+_TIME_SERIES_PERIODS = (("D", "day", 1.0), ("W", "week", 7.0), ("M", "month", 30.44), ("Y", "year", 365.25))
 
 
 def rows_per_period(dates: pd.Series) -> tuple[pd.Series, str]:
@@ -633,9 +633,9 @@ def plot_time_series(series: pd.Series, output_path: Path) -> bool:
     counts, period = rows_per_period(dates)
     fig, ax = plt.subplots(figsize=(14, 6))
     ax.plot(counts.index.to_timestamp(), counts.values, linewidth=1.5)
-    ax.set_title(f"Registros por {period}: {series.name}")
-    ax.set_xlabel("Fecha")
-    ax.set_ylabel("Filas")
+    ax.set_title(f"Rows per {period}: {series.name}")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Rows")
     ax.set_ylim(bottom=0)
     ax.grid(True, alpha=0.3)
     fig.autofmt_xdate()
@@ -656,9 +656,9 @@ def plot_time_of_day(series: pd.Series, output_path: Path) -> bool:
     ax.bar(counts.index, counts.values)
     ax.set_xticks(range(24))
     ax.set_xticklabels([f"{hour:02d}" for hour in range(24)])
-    ax.set_title(f"Hora del día: {series.name}")
-    ax.set_xlabel("Hora")
-    ax.set_ylabel("Frecuencia")
+    ax.set_title(f"Time of day: {series.name}")
+    ax.set_xlabel("Hour")
+    ax.set_ylabel("Frequency")
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     return True
@@ -681,9 +681,9 @@ def plot_target_distribution(series: pd.Series, output_path: Path) -> bool:
         counts.plot(kind="bar", ax=ax)
         ax.tick_params(axis="x", rotation=45)
 
-    ax.set_title(f"Distribución del Target: {series.name}")
+    ax.set_title(f"Target distribution: {series.name}")
     ax.set_xlabel(series.name)
-    ax.set_ylabel("Frecuencia")
+    ax.set_ylabel("Frequency")
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     return True
@@ -735,7 +735,7 @@ def plot_target_vs_feature(
 TARGET_BAR_MAX_CATEGORIES = 9
 TARGET_BAR_MAX_CLASSES = 12
 TARGET_BAR_MAX_LABELLED = 24
-_OTHERS_LABEL = "Otros"
+_OTHERS_LABEL = "Other"
 
 
 def target_vs_categorical_counts(
@@ -810,7 +810,7 @@ def plot_target_vs_categorical(
 
     ax.set_title(f"{feature.name} vs {target.name}")
     ax.set_xlabel(target.name)
-    ax.set_ylabel("Frecuencia")
+    ax.set_ylabel("Frequency")
     ax.tick_params(axis="x", rotation=0)
     ax.legend(title=feature.name)
     ax.margins(y=0.12)  # room for the labels above the tallest bar
@@ -986,9 +986,9 @@ def plot_pair_plot(
     height = 2.2 if len(spec.columns) > 4 else 2.8
     grid = sns.pairplot(data, height=height, **options)
     title = (
-        "Pair Plot"
-        + (f": por {spec.hue}" if spec.hue else "")
-        + (" (log10 en " + ", ".join(logged) + ")" if logged else "")
+        "Pair plot"
+        + (f": by {spec.hue}" if spec.hue else "")
+        + (" (log10 on " + ", ".join(logged) + ")" if logged else "")
     )
     grid.figure.suptitle(title, y=1.02)
     grid.savefig(output_path, dpi=100, bbox_inches="tight")

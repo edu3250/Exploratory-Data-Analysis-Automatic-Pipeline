@@ -12,7 +12,7 @@ recommendation carries the measurement that produced it.
 
 ![The report the pipeline generates](docs/report-preview.png)
 
-<sub>A real report from `data/raw/spaceship_titanic.csv` (8 693 × 14). Below the summary, the chart
+<sub>A real report from `data/raw/spaceship_titanic_train.csv` (8 693 × 14). Below the summary, the chart
 the pipeline drew for `RoomService`: 65.5% of its rows are 0, so the column is drawn a second time
 without them — that is the only way its distribution is visible at all.</sub>
 
@@ -77,13 +77,13 @@ help.
 this is one row of it, as the report prints it:
 
 ```text
-Age    Imputar con la mediana (27.00)
-       Falta el 2.1%. La media (28.83) queda desplazada 0.13 desviaciones
-       respecto a la mediana, arrastrada por la cola
+Age    Fill in with the median (27.00)
+       2.1% missing. The mean (28.83) sits 0.13 standard deviations away
+       from the median, pulled by the tail
 ```
 
-2.1% of `Age` is missing, and the mean sits 0.13 standard deviations away from the median because the
-tail pulls it, so the median is the value to fill with. You can check that claim without trusting it.
+The median is the value to fill with because the mean is not where the middle is, and the line says
+by how much. You can check that without trusting it.
 
 And the plan states what it will not decide: whether a categorical column is *ordinal* (over the 89
 categorical columns of the corpus, an automatic rule gets the order right on none of them) and
@@ -129,8 +129,8 @@ correlation id, the step is listed in `summary.json → failed_steps` and the re
 
 ## Notes and roadmap
 
-- **The report text is Spanish today** (the CLI messages too). The English pass has started with this
-  README; the report is next.
+- **The CLI messages are still Spanish** (`--help`, the console output and the logs). The report
+  itself — every section, chart, table and recommendation — is English; the CLI is next.
 - Reports are self-contained, so they get large on very wide datasets (>100 columns). Chart counts
   are configurable.
 - Next: generated scikit-learn preprocessing code, ordinal levels declared in the config, missingness
