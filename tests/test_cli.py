@@ -44,7 +44,7 @@ class TestAnalyzeFile:
 
         assert result.exit_code == 0, result.output
         assert "data" in result.output
-        assert "Reporte HTML" in result.output
+        assert "   HTML report:" in result.output  # the CLI's own summary line, not the log line
 
     def test_missing_file_is_a_usage_error(self, runner, tmp_output_dir):
         result = runner.invoke(cli, ["analyze-file", str(tmp_output_dir / "no_existe.csv")])
@@ -147,7 +147,7 @@ class TestAnalyzeFile:
         result = runner.invoke(cli, ["analyze-file", str(csv_path), "--config", str(config_path)])
 
         assert result.exit_code == 2
-        assert "configuración" in result.output
+        assert "Configuration error" in result.output
 
 
 class TestAnalyzeBatch:

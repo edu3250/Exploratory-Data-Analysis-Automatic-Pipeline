@@ -402,7 +402,7 @@ class TestStepIsolation:
         assert summary["failed_steps"] == ["outliers"]
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
-        assert "outliers" in html  # shown in the "Pasos con Error" section
+        assert "outliers" in html  # shown in the "Failed Steps" section
 
     def test_strict_mode_reraises_step_failure_immediately(self, tmp_output_dir, synthetic_dataset, monkeypatch):
         import eda_pipeline.pipeline as pipeline_module
@@ -719,7 +719,7 @@ class TestOutputCompleteness:
         assert "Q3" in section[: section.index("</section>")]
 
     def test_report_shows_the_first_rows_before_the_univariate_section(self, tmp_output_dir):
-        """A preview of the data must sit ahead of «Análisis Univariado» in the report."""
+        """A preview of the data must sit ahead of «Column by Column» in the report."""
         n = 30
         df = pd.DataFrame({"ciudad": [f"Ciudad {i % 3}" for i in range(n)], "monto": [100.0 + i for i in range(n)]})
         csv_file = tmp_output_dir / "ventas.csv"
@@ -961,7 +961,7 @@ class TestOutputCompleteness:
         assert "Association Between Columns" in html
 
     def test_quality_table_shows_how_each_column_was_classified(self, tmp_output_dir):
-        """The «Calidad de Datos» table must show the dtype and the inferred category per column."""
+        """The «Data Quality» table must show the dtype and the inferred type per column."""
         n = 120
         df = pd.DataFrame(
             {

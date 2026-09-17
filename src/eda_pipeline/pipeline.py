@@ -201,7 +201,7 @@ class EDAPipeline:
         """Discover files in the input folder and process them one at a time (not preloaded)."""
         folder_path = Path(self.config.input_folder)
         files = discover_batch_files(folder_path, self.config.batch_pattern)
-        self.logger.info(f"Se encontraron {len(files)} archivo(s) para procesar en {folder_path}")
+        self.logger.info(f"Found {len(files)} file(s) to process in {folder_path}")
 
         # One folder for the whole run: a folder of eight files used to scatter eight timestamped
         # report folders across the output directory, mixed with those of every previous run.
@@ -226,7 +226,7 @@ class EDAPipeline:
         """
         raw = folder_path.resolve().name
         slug = "".join(char if (char.isalnum() or char in "-._") else "_" for char in raw).strip("._")
-        return f"{slug or 'datos'}_batch_{timestamp}"
+        return f"{slug or 'data'}_batch_{timestamp}"
 
     def _dataset_output_dir(self, dataset_name: str, batch_dir: Path | None) -> Path:
         """
@@ -264,7 +264,7 @@ class EDAPipeline:
                 sample_size=self.config.sample_size,
             )
         except Exception as e:
-            self.logger.error(f"No se pudo cargar {file_path.name}: {e}\n{traceback.format_exc()}")
+            self.logger.error(f"Could not load {file_path.name}: {e}\n{traceback.format_exc()}")
             if self.config.strict_mode:
                 raise
             return {"error": str(e), "success": False}
@@ -495,7 +495,7 @@ class EDAPipeline:
         # How each column ended up stored, shown in the report next to its inferred type.
         column_dtypes = {col: str(dtype) for col, dtype in df.dtypes.items()}
 
-        self.logger.info("Writing tablas CSV...")
+        self.logger.info("Writing the CSV tables...")
         self._run_step(
             "tables",
             failed_steps,
