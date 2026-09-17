@@ -127,6 +127,7 @@ def analyze_file(
     """
     Analyze a single data file.
 
+    \b
     EXAMPLES:
         eda analyze-file data.csv
         eda analyze-file data.csv --target target_col --output-dir ./my_reports
@@ -206,6 +207,7 @@ def analyze_batch(
     a file that fails is reported with ❌ and the rest of the batch carries
     on, unless --strict is used.
 
+    \b
     EXAMPLES:
         eda analyze-batch ./data
         eda analyze-batch ./data --pattern "*.csv" --target target_col
@@ -250,6 +252,7 @@ def init_config(output):
     """
     Create a template configuration file.
 
+    \b
     EXAMPLES:
         eda init-config
         eda init-config --output my_config.yaml
