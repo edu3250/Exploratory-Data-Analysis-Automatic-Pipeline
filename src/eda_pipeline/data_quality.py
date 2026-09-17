@@ -3,6 +3,7 @@ Data quality analysis: missing values, duplicates, constants, cardinality, type 
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -298,6 +299,19 @@ def detect_mixed_types(df: pd.DataFrame) -> tuple[list[str], list[Alert]]:
     return mixed_cols, alerts
 
 
+# A number as it is written in a table: an optional sign, digits with at most one decimal point, and
+# an optional exponent. float() is looser than this and accepts things no numeric column holds:
+# "0001_01" is 101.0 to it, because Python reads "_" as a digit separator, so every PassengerId of
+# the spaceship titanic data was reported as a number kept as text. It also accepts "nan", "inf" and
+# "-Infinity", which are words.
+_NUMBER_PATTERN = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")
+
+
+def looks_like_number(value: object) -> bool:
+    """Is this cell a number written as text, as a person would write it?"""
+    return bool(_NUMBER_PATTERN.match(str(value).strip()))
+
+
 def detect_numeric_as_text(df: pd.DataFrame) -> tuple[dict[str, int], list[Alert]]:
     """
     Detect numeric values stored as text.
@@ -312,14 +326,7 @@ def detect_numeric_as_text(df: pd.DataFrame) -> tuple[dict[str, int], list[Alert
         if pd.api.types.is_string_dtype(df[col]):
             non_null = df[col].dropna()
             if len(non_null) > 0:
-                # Count numeric-looking strings
-                numeric_count = 0
-                for val in non_null:
-                    try:
-                        float(val)
-                        numeric_count += 1
-                    except (ValueError, TypeError):
-                        pass
+                numeric_count = sum(1 for val in non_null if looks_like_number(val))
 
                 if numeric_count > 0.8 * len(non_null):
                     numeric_as_text[col] = numeric_count
