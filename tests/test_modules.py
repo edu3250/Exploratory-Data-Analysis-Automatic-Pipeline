@@ -944,6 +944,48 @@ class TestOutlierDetection:
         assert "MAD = 0" in info.note
 
 
+class TestIqrOnARepeatedValue:
+    """A value that fills a quarter of the column pins a quartile, and the fence then measures it."""
+
+    @staticmethod
+    def _spending(zeros: int = 650, spenders: int = 350, seed: int = 0) -> pd.Series:
+        """Like RoomService on the spaceship data: most passengers spend nothing, the rest spend a lot."""
+        rng = np.random.default_rng(seed)
+        spent = rng.lognormal(mean=4.0, sigma=1.3, size=spenders)
+        return pd.Series(np.concatenate([np.zeros(zeros), spent]), name="RoomService")
+
+    def test_a_column_of_mostly_zeros_is_measured_over_the_rows_that_are_not_zero(self):
+        # Before: the fence sat at 2.5 x Q3 and flagged a fifth of the column.
+        series = self._spending()
+        info = detect_outliers_iqr(series)
+        assert info.n_outliers / len(series) * 100 < 8
+        assert info.n_outliers > 0  # the real extremes are still found
+
+    def test_the_note_says_which_value_took_over_the_quartiles(self):
+        info = detect_outliers_iqr(self._spending())
+        assert "0" in info.note and "65.0%" in info.note
+
+    def test_a_column_without_a_repeated_value_keeps_its_fence(self):
+        rng = np.random.default_rng(0)
+        series = pd.Series(np.concatenate([rng.normal(100, 10, 500), [400.0, 450.0]]), name="medida")
+        info = detect_outliers_iqr(series)
+        assert info.note == ""
+        assert {400.0, 450.0} <= set(info.values)
+
+    def test_a_repeated_value_under_a_quarter_of_the_rows_changes_nothing(self):
+        # penguins: 190 mm is exactly Q1 of Flipper Length, but only 6.4% of the rows.
+        rng = np.random.default_rng(1)
+        values = np.concatenate([np.full(30, 190.0), rng.normal(200, 14, 312)])
+        info = detect_outliers_iqr(pd.Series(values, name="Flipper Length (mm)"))
+        assert info.note == ""
+
+    def test_a_column_with_no_spread_at_all_still_says_so(self):
+        series = pd.Series([0.0] * 77 + [0.1] * 17 + [0.2] * 3 + [0.3] * 3, name="discount_pct")
+        info = detect_outliers_iqr(series)
+        assert info.n_outliers == 0
+        assert "IQR = 0" in info.note
+
+
 class TestIsolationForest:
     """Isolation Forest flagged a fixed 10% of every dataset, whatever its data looked like."""
 
@@ -1501,7 +1543,6 @@ class TestPreprocessingRecommendations:
     @staticmethod
     def _plan(df, target_column=None):
         """Build the plan from the same analyses the pipeline runs."""
-        from eda_pipeline.outlier_detection import analyze_outliers
         from eda_pipeline.recommendations import build_recommendations
         from eda_pipeline.relationships import compute_correlation_matrix
         from eda_pipeline.type_inference import get_numeric_columns
@@ -1514,7 +1555,6 @@ class TestPreprocessingRecommendations:
             types,
             quality=analyze_data_quality(df, column_types=types),
             numeric_stats=analyze_univariate(df, types).numeric_stats,
-            outliers=analyze_outliers(df, numeric_cols, isolation_forest_enabled=False),
             correlation_matrix=compute_correlation_matrix(df, numeric_cols),
             log_scale_columns=log_scale_columns(df, types),
             target_column=target_column,
@@ -1775,7 +1815,31 @@ class TestPreprocessingRecommendations:
         rec = self._rows(plan, step=STEP_SCALE, column="sesgada")
         assert len(rec) == 1
         assert "RobustScaler" in rec[0].action
-        assert "outliers" in rec[0].evidence
+        assert "veces el rango intercuartil" in rec[0].evidence
+
+    def test_a_column_of_mostly_zeros_with_a_tail_gets_a_robust_scaler(self):
+        """RoomService: the corrected IQR fence flags only 2% of it, but its tail still rules the mean."""
+        from eda_pipeline.recommendations import STEP_SCALE
+
+        rng = np.random.default_rng(2)
+        gasto = np.concatenate([np.zeros(200), rng.lognormal(mean=4.0, sigma=1.3, size=100)])
+        plan = self._plan(self._frame(gasto=gasto))
+
+        rec = self._rows(plan, step=STEP_SCALE, column="gasto")
+        assert len(rec) == 1
+        assert "RobustScaler" in rec[0].action
+
+    def test_a_column_with_no_spread_is_not_sent_to_a_robust_scaler(self):
+        """Its interquartile range is 0: RobustScaler would have nothing to divide by."""
+        from eda_pipeline.recommendations import STEP_SCALE
+
+        tiers = [0.0] * 77 + [0.1] * 17 + [0.2] * 3 + [0.3] * 3
+        plan = self._plan(self._frame(descuento=[tiers[i % 100] for i in range(300)]))
+
+        rec = self._rows(plan, step=STEP_SCALE, column="descuento")
+        assert len(rec) == 1
+        assert "StandardScaler" in rec[0].action
+        assert "IQR = 0" in rec[0].evidence
 
     def test_a_well_behaved_column_gets_a_standard_scaler(self):
         from eda_pipeline.recommendations import STEP_SCALE
@@ -1785,6 +1849,7 @@ class TestPreprocessingRecommendations:
         rec = self._rows(plan, step=STEP_SCALE, column="medida")
         assert len(rec) == 1
         assert "StandardScaler" in rec[0].action
+        assert "concuerdan" in rec[0].evidence
 
     def test_a_column_already_drawn_on_a_log_scale_is_transformed_first(self):
         from eda_pipeline.recommendations import STEP_SCALE

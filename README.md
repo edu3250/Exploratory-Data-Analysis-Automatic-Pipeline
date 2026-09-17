@@ -396,6 +396,14 @@ de las ventas), el IQR y el MAD valen 0: el rango "normal" se reduce a ese únic
 saldría como atípico. En ese caso el método no se aplica a la columna; `tables/outlier_summary.csv` lo
 explica en la columna `nota` y el reporte lista las columnas sin IQR.
 
+Un escalón más abajo está el caso en que **un solo valor se queda con un cuartil**: en los datos de
+Spaceship Titanic, `RoomService` vale 0 en el 65 % de las filas, así que Q1 = 0, el límite quedaba en
+2.5×Q3 y el IQR marcaba una quinta parte de la columna (entre las seis numéricas, 5 030 de las 8 693
+filas). Cuando el valor más repetido ocupa al menos el 25 % de las filas y coincide con Q1 o Q3, el
+rango normal se mide sobre las filas que tienen otro valor, y la columna `nota` lo dice. Sobre las 111
+columnas numéricas de `data/raw`, 24 tienen un cuartil pegado y solo 9 marcaban más del 1 %: esas pasan
+del 14-22 % al 2-10 %, y ninguna otra columna cambia.
+
 ### Relaciones
 
 - **Numeric ↔ Numeric**: Correlación Pearson (con p-value)
@@ -477,8 +485,8 @@ magnitudes son incomparables —eso es un hecho medido— y deja la decisión de
    desaconseja el one-hot y sugiere agrupar o codificar por frecuencia.
 5. **Escalar**: primero si hace falta, comparando la desviación mayor con la menor (a partir de 10
    veces); después qué escalador conviene a cada columna: `log10` antes de escalar si ya se dibuja en
-   escala logarítmica, `RobustScaler` si más del 5 % de sus valores son outliers por IQR, y
-   `StandardScaler` en el resto.
+   escala logarítmica, `RobustScaler` cuando su desviación estándar es más del doble de su rango
+   intercuartil (la cola arrastra la media), y `StandardScaler` en el resto.
 
 Cada umbral se fijó midiendo los 24 datasets de `data/raw` antes de escribir la regla; el porqué de
 cada uno está comentado en `src/eda_pipeline/recommendations.py`.

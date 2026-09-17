@@ -32,6 +32,31 @@ class OutlierInfo:
 NO_SPREAD_NOTE_IQR = "Sin dispersión (IQR = 0): al menos la mitad de los valores son iguales"
 NO_SPREAD_NOTE_MAD = "Sin dispersión (MAD = 0): al menos la mitad de los valores son iguales"
 
+# A value that fills a quarter of a column lands on a quartile and the box then measures that value
+# instead of the spread. On the spaceship titanic data, RoomService is 0 on 65% of the rows, so Q1
+# was 0, the fence fell at 2.5 x Q3 and a fifth of the column came back as outliers; over the six
+# numeric columns that was 5 030 of the 8 693 rows. Measured over the 111 numeric columns of
+# data/raw, 24 have a quartile pinned to a repeated value and only 9 of them flag more than 1%;
+# drawing the fence over the rows that hold a different value brings those 9 from 14-22% to 2-10%,
+# and leaves every other column untouched.
+PINNED_VALUE_MIN_SHARE = 0.25
+
+
+def pinned_value(valid: pd.Series, q25: float, q75: float) -> float | None:
+    """
+    The repeated value that took over a quartile, if there is one.
+
+    A quartile sitting exactly on a value that fills at least a quarter of the column is measuring
+    that value, not the spread around it.
+    """
+    if valid.empty:
+        return None
+    counts = valid.value_counts()
+    top_value = counts.index[0]
+    if counts.iloc[0] / len(valid) < PINNED_VALUE_MIN_SHARE:
+        return None
+    return top_value if top_value in (q25, q75) else None
+
 
 def detect_outliers_iqr(series: pd.Series, multiplier: float = 1.5) -> OutlierInfo:
     """
@@ -61,6 +86,20 @@ def detect_outliers_iqr(series: pd.Series, multiplier: float = 1.5) -> OutlierIn
             note=NO_SPREAD_NOTE_IQR,
         )
 
+    note = ""
+    pinned = pinned_value(valid, q25, q75)
+    if pinned is not None:
+        rest = valid[valid != pinned]
+        rest_q25, rest_q75 = rest.quantile(0.25), rest.quantile(0.75)
+        if rest_q75 > rest_q25:
+            share = float((valid == pinned).mean() * 100)
+            note = (
+                f"El valor {pinned:g} ocupa el {share:.1f}% de las filas y se queda con un cuartil: "
+                f"el rango normal se midió sobre las demás"
+            )
+            q25, q75 = rest_q25, rest_q75
+            iqr = q75 - q25
+
     lower_bound = q25 - multiplier * iqr
     upper_bound = q75 + multiplier * iqr
 
@@ -74,6 +113,7 @@ def detect_outliers_iqr(series: pd.Series, multiplier: float = 1.5) -> OutlierIn
         n_outliers=len(outlier_idx),
         outlier_indices=outlier_idx,
         values=outlier_values,
+        note=note,
     )
 
 
