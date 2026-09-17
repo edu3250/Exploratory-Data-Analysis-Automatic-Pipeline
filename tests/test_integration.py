@@ -437,8 +437,83 @@ class TestOutputCompleteness:
             "correlations.csv",
             "outlier_summary.csv",
             "alerts.csv",
+            "recommendations.csv",
         }
         assert expected.issubset({p.name for p in tables_dir.glob("*.csv")})
+
+    def test_the_report_closes_with_a_preprocessing_plan(self, tmp_output_dir):
+        """The last section: what to drop, impute, encode and scale, each line with its measurement."""
+        import numpy as np
+
+        rng = np.random.default_rng(0)
+        n = 400
+        df = pd.DataFrame(
+            {
+                "cliente_id": [f"C{i:05d}" for i in range(n)],
+                "monto": rng.lognormal(mean=12, sigma=2.0, size=n),
+                "edad": rng.normal(45, 12, n),
+                "region": [["norte", "sur", "centro", "occidente"][i % 4] for i in range(n)],
+                "comentario": [None] * (n - 20) + [f"nota {i}" for i in range(20)],
+            }
+        )
+        df.loc[df.index[:30], "edad"] = None
+        csv_file = tmp_output_dir / "creditos.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["creditos"]
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        assert summary["failed_steps"] == []
+
+        plan = summary["recommendations"]
+        assert {rec["step"] for rec in plan} == {"descartar", "imputar", "codificar", "escalar"}
+        dropped = {rec["column"] for rec in plan if rec["step"] == "descartar"}
+        assert {"cliente_id", "comentario"} <= dropped
+        assert [r for r in plan if r["column"] == "edad" and r["step"] == "imputar"]
+        assert [r for r in plan if r["column"] == "region" and r["step"] == "codificar"]
+        # A dropped column is not carried into the later steps.
+        assert [r for r in plan if r["column"] == "cliente_id"] == [
+            r for r in plan if r["column"] == "cliente_id" and r["step"] == "descartar"
+        ]
+
+        table = pd.read_csv(Path(result["output_dir"]) / "tables" / "recommendations.csv")
+        assert set(table["paso"]) == {"descartar", "imputar", "codificar", "escalar"}
+        assert table["evidencia"].notna().all()
+
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        assert "Plan de Preprocesamiento" in html
+        assert html.index('id="preprocesamiento"') > html.index('id="visualizaciones"')  # closes the report
+
+    def test_the_plan_keeps_the_target_out_of_the_feature_steps(self, tmp_output_dir):
+        """The target is what you predict: it is neither encoded nor scaled, and its gaps drop rows."""
+        import numpy as np
+
+        rng = np.random.default_rng(1)
+        n = 300
+        df = pd.DataFrame(
+            {
+                "ingreso": rng.lognormal(mean=10, sigma=1.5, size=n),
+                "score": rng.normal(600, 40, n),
+                "abandono": [["si", "no"][i % 2] for i in range(n)],
+            }
+        )
+        df.loc[df.index[:15], "abandono"] = None
+        csv_file = tmp_output_dir / "clientes.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(
+            input_file=str(csv_file),
+            output_dir=str(tmp_output_dir),
+            target=TargetConfig(target_column="abandono"),
+        )
+        results = pipeline.run()
+
+        summary = json.loads(Path(results["clientes"]["summary_json"]).read_text(encoding="utf-8"))
+        plan = summary["recommendations"]
+        target_rows = [rec for rec in plan if rec["column"] == "abandono"]
+        assert len(target_rows) == 1
+        assert target_rows[0]["step"] == "descartar"
+        assert "15 filas" in target_rows[0]["evidence"]
 
     def test_a_column_without_spread_is_not_reported_as_outliers(self, tmp_output_dir):
         """IQR marked 34% of Order_Details as outliers: discount_pct is 0 on 77% of its rows."""

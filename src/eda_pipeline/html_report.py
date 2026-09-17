@@ -11,6 +11,7 @@ from typing import Optional
 import pandas as pd
 from jinja2 import Template
 
+from .recommendations import recommendations_by_step
 from .type_inference import dtype_label, semantic_type_label
 from .visualizations import PAIR_PLOT_MIN_HUE_ETA, PIE_MAX_CATEGORIES
 
@@ -270,6 +271,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             {% if outliers %}<li><a href="#outliers">Análisis de Outliers</a></li>{% endif %}
             {% if target_analysis %}<li><a href="#target">Análisis de Target</a></li>{% endif %}
             <li><a href="#visualizaciones">Visualizaciones</a></li>
+            {% if recommendation_steps %}<li><a href="#preprocesamiento">Plan de Preprocesamiento</a></li>{% endif %}
         </ul>
     </div>
 
@@ -779,6 +781,36 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
     </section>
 
+    {% if recommendation_steps %}
+    <section id="preprocesamiento">
+        <h2>🧭 Plan de Preprocesamiento ({{ recommendations | length }})</h2>
+        <p>Los pasos en el orden en que se aplican, y al lado de cada línea la medición que la produjo,
+           para poder comprobarla en vez de creerla.</p>
+        <p><strong>Aquí solo está lo que los datos deciden por sí solos.</strong> Quedan fuera dos cosas
+           que no se pueden leer de la tabla: si una variable categórica es <em>ordinal</em> y en qué orden
+           van sus niveles, y si su modelo necesita escalado (un árbol no lo necesita; una distancia o una
+           penalización sí). El plan decide sobre las columnas numéricas y categóricas; las fechas, las
+           horas y el texto libre solo aparecen si guardan números como texto.</p>
+        {% for step, label, rows in recommendation_steps %}
+        <h3>{{ label }} ({{ rows | length }})</h3>
+        <table>
+            <thead>
+                <tr><th style="width: 18%;">Columna</th><th style="width: 34%;">Acción</th><th>Por qué (medido)</th></tr>
+            </thead>
+            <tbody>
+                {% for rec in rows %}
+                <tr>
+                    <td>{% if rec.column %}<code>{{ rec.column }}</code>{% else %}<em>toda la tabla</em>{% endif %}</td>
+                    <td>{{ rec.action }}</td>
+                    <td style="color: #555;">{{ rec.evidence }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endfor %}
+    </section>
+    {% endif %}
+
     <footer>
         <p>Generado por EDA Pipeline v0.1.0 | Reporte Auto-Contenido (Offline-Ready)</p>
     </footer>
@@ -809,6 +841,7 @@ def generate_html_report(
     time_stats: Optional[dict] = None,
     pair_plot=None,
     log_scale_columns: Optional[list] = None,
+    recommendations: Optional[list] = None,
 ) -> str:
     """
     Generate HTML report with embedded base64 images.
@@ -822,6 +855,7 @@ def generate_html_report(
         time_stats: ``{column: TimeOfDayStats}`` for the time-of-day columns.
         pair_plot: The ``PairPlotSpec`` the pair plot was drawn from, described next to it.
         log_scale_columns: Columns drawn with a log scale next to the linear chart.
+        recommendations: The preprocessing plan (``Recommendation`` list), shown as the last section.
 
     Returns:
         Path to generated HTML file
@@ -854,6 +888,8 @@ def generate_html_report(
         "time_stats": time_stats or {},
         "pair_plot": pair_plot,
         "log_scale_columns": log_scale_columns or [],
+        "recommendations": recommendations or [],
+        "recommendation_steps": recommendations_by_step(recommendations),
         "pair_plot_min_eta": PAIR_PLOT_MIN_HUE_ETA,
         "correlations": correlations,
         "numeric_pairs": correlations.get("numeric_pairs", []),
