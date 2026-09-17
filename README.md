@@ -138,4 +138,4 @@ correlation id, the step is listed in `summary.json → failed_steps` and the re
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

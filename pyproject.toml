@@ -9,7 +9,7 @@ description = "Complete Exploratory Data Analysis (EDA) pipeline for any tabular
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-    { name = "Data Science Team", email = "dataops@example.com" }
+    { name = "Eduardo Arenas", email = "edu3250@gmail.com" }
 ]
 license = { text = "MIT" }
 
