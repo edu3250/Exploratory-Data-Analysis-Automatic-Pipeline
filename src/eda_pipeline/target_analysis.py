@@ -11,7 +11,15 @@ import pandas as pd
 from scipy.stats import chi2_contingency, kruskal
 from sklearn.feature_selection import mutual_info_regression
 
+from .relationships import correlation_ratio
+
 logger = logging.getLogger(__name__)
+
+# An identifier names the row and free text is different on every row, so a chi-square over their
+# thousands of categories measures uniqueness, not a relationship with the target: PassengerId led
+# the spaceship table with an effect of 1.000 and Name with 0.999. Dates and times are not compared
+# either; the report charts them over time instead.
+UNTESTABLE_TYPES = ("identifier", "text", "datetime", "time", "constant")
 
 
 @dataclass
@@ -198,6 +206,9 @@ def test_feature_target_numeric(
                 test_statistic=h_stat,
                 p_value=float(p),
                 test_name="kruskal_wallis",
+                # The correlation ratio, the same 0-to-1 measure the association map uses for a
+                # category against a number, so this column can be read next to Cramér's V.
+                effect_size=float(correlation_ratio(valid["target"], valid["feature"])),
                 support=len(valid),
             )
         except Exception as e:
@@ -245,6 +256,7 @@ def analyze_target(
     target_type: Optional[str] = None,
     feature_columns: Optional[list[str]] = None,
     imbalance_threshold: float = 0.8,
+    column_types: Optional[dict[str, str]] = None,
 ) -> TargetAnalysisReport:
     """
     Perform comprehensive target variable analysis.
@@ -255,6 +267,8 @@ def analyze_target(
         target_type: 'classification' or 'regression'; auto-detect if None
         feature_columns: List of feature columns to test against target
         imbalance_threshold: Threshold for flagging imbalanced classification
+        column_types: Inferred semantic types, so identifiers and free text are left out of the
+            feature table. Every column is tested when they are not given.
 
     Returns:
         TargetAnalysisReport
@@ -277,10 +291,14 @@ def analyze_target(
     # Feature selection: use only numeric and categorical columns not in ignore list
     if feature_columns is None:
         feature_columns = [col for col in df.columns if col != target_column]
+    if column_types:
+        feature_columns = [col for col in feature_columns if column_types.get(col) not in UNTESTABLE_TYPES]
 
-    # Test feature-target relationships
+    # Test feature-target relationships. Which test fits depends on the kind of target, not on how it
+    # happens to be stored: Transported is a boolean and stroke is 0/1, and both were read as numeric
+    # targets, so their numeric features took the regression branch and came back without a p-value.
     feature_relationships = []
-    is_target_numeric = pd.api.types.is_numeric_dtype(target)
+    is_target_numeric = target_type != "classification"
 
     for feat_col in feature_columns:
         feature = df[feat_col]
@@ -293,8 +311,17 @@ def analyze_target(
         if not np.isnan(rel.p_value) or not np.isnan(rel.test_statistic):
             feature_relationships.append(rel)
 
-    # Sort by p-value (smallest first)
-    feature_relationships.sort(key=lambda r: r.p_value if not np.isnan(r.p_value) else float("inf"))
+    # The section answers which features are most related to the target, so it is ranked by how much
+    # each one separates it (Cramér's V or the correlation ratio, both from 0 to 1) and only then by
+    # the p-value. With thousands of rows every p-value collapses to 0 and cannot rank anything: on
+    # the spaceship data, Spa and RoomService both come back as p = 0 while their effects are 0.22
+    # and 0.25.
+    feature_relationships.sort(
+        key=lambda r: (
+            -(r.effect_size if r.effect_size is not None and not np.isnan(r.effect_size) else 0.0),
+            r.p_value if not np.isnan(r.p_value) else float("inf"),
+        )
+    )
 
     # Detect leakage
     leakage_alerts = detect_leakage(df, target_column, feature_columns)

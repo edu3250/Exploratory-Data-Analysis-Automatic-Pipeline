@@ -805,6 +805,104 @@ class TestTargetAnalysis:
         assert balance.is_imbalanced is False
 
 
+class TestTargetFeatureTable:
+    """What the «Features más relacionadas con Target» table may hold, and which test produces it."""
+
+    @staticmethod
+    def _frame(n: int = 300, target="bool", seed: int = 0) -> pd.DataFrame:
+        """A table shaped like the spaceship data: an id, free text, a category and two numbers."""
+        rng = np.random.default_rng(seed)
+        edad = rng.normal(40, 12, n)
+        transported = (edad < 40) == (np.arange(n) % 10 < 8)  # age separates the two classes
+        return pd.DataFrame(
+            {
+                "PassengerId": [f"{i:04d}_01" for i in range(n)],
+                "Name": [f"nombre apellido numero {i}" for i in range(n)],
+                "planeta": [["Earth", "Europa", "Mars"][i % 3] for i in range(n)],
+                "edad": edad,
+                "gasto": rng.lognormal(mean=4, sigma=1.2, size=n),
+                "objetivo": transported if target == "bool" else transported.astype(int),
+            }
+        )
+
+    @staticmethod
+    def _tested(report) -> dict:
+        return {rel.feature: rel for rel in report.feature_relationships}
+
+    def _report(self, df, target_column="objetivo", **kwargs):
+        from eda_pipeline.target_analysis import analyze_target
+        from eda_pipeline.type_inference import infer_all_types
+
+        return analyze_target(df, target_column, column_types=infer_all_types(df), **kwargs)
+
+    def test_identifiers_and_free_text_stay_out(self):
+        """PassengerId led the table with an effect of 1.000: Cramér's V over 8 693 categories."""
+        tested = self._tested(self._report(self._frame()))
+        assert "PassengerId" not in tested
+        assert "Name" not in tested
+        assert {"planeta", "edad", "gasto"} <= set(tested)
+
+    def test_a_classification_target_stored_as_a_boolean_still_compares_groups(self):
+        """Transported is a boolean, so every numeric feature took the regression branch and lost its p-value."""
+        rel = self._tested(self._report(self._frame(target="bool")))["edad"]
+        assert rel.test_name == "kruskal_wallis"
+        assert rel.p_value < 0.01
+
+    def test_a_classification_target_stored_as_zero_and_one_does_too(self):
+        rel = self._tested(self._report(self._frame(target="int")))["edad"]
+        assert rel.test_name == "kruskal_wallis"
+
+    def test_a_numeric_feature_gets_an_effect_between_zero_and_one(self):
+        """The same measure the association map uses, so the column can be read next to Cramér's V."""
+        tested = self._tested(self._report(self._frame()))
+        assert 0.0 <= tested["edad"].effect_size <= 1.0
+        assert tested["edad"].effect_size > tested["gasto"].effect_size  # age is what separates them
+
+    def test_a_regression_target_keeps_mutual_information(self):
+        rng = np.random.default_rng(1)
+        df = pd.DataFrame({"x": rng.normal(0, 1, 300), "ruido": rng.normal(0, 1, 300)})
+        df["precio"] = df["x"] * 1000 + rng.normal(0, 50, 300)
+        rel = self._tested(self._report(df, target_column="precio"))["x"]
+        assert rel.test_name == "mutual_info"
+        assert rel.effect_size > 0
+
+    def test_without_the_types_every_column_is_still_tested(self):
+        """The types are optional: callers that do not pass them keep the old behaviour."""
+        from eda_pipeline.target_analysis import analyze_target
+
+        report = analyze_target(self._frame(), "objetivo")
+        assert "PassengerId" in {rel.feature for rel in report.feature_relationships}
+
+
+class TestMeasureFormatting:
+    """A measured 0 is a result, not a missing value."""
+
+    def test_zero_is_shown_as_zero(self):
+        from eda_pipeline.html_report import format_measure
+
+        assert format_measure(0.0, 3) == "0.000"
+
+    def test_a_missing_measure_says_na(self):
+        from eda_pipeline.html_report import format_measure
+
+        assert format_measure(None) == "N/A"
+        assert format_measure(float("nan")) == "N/A"
+
+    def test_decimals_are_respected(self):
+        from eda_pipeline.html_report import format_measure
+
+        assert format_measure(0.0123456, 4) == "0.0123"
+        assert format_measure(0.196, 3) == "0.196"
+
+    def test_a_tiny_p_value_does_not_read_as_certainty(self):
+        from eda_pipeline.html_report import format_p_value
+
+        assert format_p_value(0.0) == "<0.0001"  # it only underflowed
+        assert format_p_value(1e-40) == "<0.0001"
+        assert format_p_value(0.0005) == "0.0005"
+        assert format_p_value(None) == "N/A"
+
+
 class TestUnivariateAnalysis:
     """Test univariate analysis."""
 
