@@ -554,3 +554,56 @@ Verified with real output:
 - The plan was generated for all 24 datasets and read against the raw CSVs before publishing. That changed five things: numbers kept as text (`amazon.rating`, 1 464 of them read as 28 categories) now get a **convertir** step of their own at the front instead of being offered an encoding, and those columns sit out the remaining steps; a gap of 0.097 no longer prints as «0.10, por debajo de 0.10» (`Culmen Length (mm)`); «1 categorías aparecen» agrees in number now; five categories over 40 rows say the table is small instead of asking to group rare categories the column does not have (`Products.product_category`); and an identifier says it was classified as one rather than quoting a cardinality that does not look like a key (`Sample Number`, 152 distinct values over 344 rows). The steps are not numbered either: without columns to convert, the plan would have started at «2».
 - Reports regenerated on `main` after the merge, all without a failed step, with the plan as the last section, its CSV written and the target left out of the feature steps: `reports/mx_batch_20260916_203749` (8 lines for `clientes`, 7 for `cobranza`, 19 for `credito_asegurado`, 14 for `siniestros`), `reports/penguins_batch_20260916_203959` (24 and 13) and `reports/healthcare-dataset-stroke-data_20260916_203825` (10, with `--target stroke`).
 - Known limit: redundant pairs are reported one pair at a time. In `siniestros` four pairs share columns, so following them one by one would drop more than necessary; the VIF in the relationships section is what covers a whole group.
+
+## Stage 26: The five defects the Spaceship Titanic report showed
+**Goal**: The user asked for a report of the Kaggle Spaceship Titanic data (`data/raw/spaceship_titanic.csv`, 8 693 x 14, with `--target Transported`) and for it to be checked for failures. The run itself was clean, so the check was reading the report against the raw CSV.
+
+**Success Criteria**:
+- A cell counts as a number kept as text only when it is written as one. `float()` is looser: it reads `_` as a digit separator, so `float("0001_01")` is 101.0 and every PassengerId was reported as a number.
+- The IQR fence is not drawn around a repeated value. When the most repeated value takes at least 25% of the rows and equals Q1 or Q3, the fence is measured over the rows holding a different value, and the note says which value took over.
+- The scaler in the preprocessing plan is chosen from the spreads themselves, so that correction cannot flip it: `RobustScaler` when the standard deviation is more than twice the interquartile range.
+- The feature-target table holds only columns that describe the rows, runs the test the kind of target calls for, carries one 0-to-1 effect measure, and is ranked by it.
+- A measured 0 is shown as 0, and a p-value under 0.0001 as `<0.0001`, escaped.
+- `ruff check .` and `ruff format --check .` are clean, with no warnings.
+
+**Tests** (all failed before the fixes):
+- `tests/test_modules.py::TestDataQuality`: 5 tests on what counts as a number written as text.
+- `tests/test_modules.py::TestIqrOnARepeatedValue`: 5 tests, plus 2 in `TestPreprocessingRecommendations` for the scaler that must survive the correction.
+- `tests/test_modules.py::TestTargetFeatureTable` (7) and `TestMeasureFormatting` (4).
+- `tests/test_integration.py::TestOutputCompleteness::test_target_analysis_adds_grouped_bars_per_categorical` also checks the p-value reaches the page as text.
+
+**Status**: COMPLETE. PRs #34 (`33275be`), #35 (`6066486`) and #36 (`30de427`) were merged on 2026-09-17, and their branches were deleted.
+
+Verified with real output:
+- **287, 289 and 292 tests** on the three branches, 0 failed, no warning under `-W error::UserWarning`, ruff clean. No pair of branches conflicted (`git merge-tree`) and the three merged together passed **304**, which is what `main` passes after the merges.
+- Every figure in the report matched the raw CSV read independently: the 12 missing percentages, the means, medians, standard deviations, IQR outlier shares and cardinalities. No step failed. The defects were in what the report said, not in whether it ran.
+- **PassengerId**: of the two columns flagged as numbers kept as text over the 24 datasets, one was wrong. `amazon.rating` (1 464 of 1 465 values) is still flagged and nothing new is.
+- **58% of the rows as outliers**: `RoomService` is 0 on 65.5% of the rows, so Q1 was 0 and the fence fell at 2.5 x Q3, flagging 21.9% of the column; across the six numeric columns that was 5 030 of the 8 693 rows. Measured over the 111 numeric columns, 24 have a quartile pinned to a repeated value and only 9 flagged more than 1%: those go from 14-22% to 2-10%, the spaceship rows flagged by IQR go from 5 030 to 1 254, and no other column changes. The 25% floor keeps small pins out (`penguins.flipper_length_mm` equals Q1 at 190 mm on 6.4% of the rows).
+- **The scaler**: keyed on that same share, the correction alone would have sent five zero-inflated columns to a `StandardScaler` carrying the evidence «media y desviación son estables», which is false for a column whose mean is 224 and whose median is 0. Over the same 111 columns the spread ratio separates the two groups with nothing in between (1.23 for the widest below, 3.60 for the narrowest above), and it also stops the old rule picking columns whose mean and standard deviation are fine (`Order_Details.unit_price` and `Returns.refund_amount`, both at a ratio of 1.0).
+- **The target table** led with `PassengerId` at an effect of 1.000, `Name` at 0.999 and `Cabin` at 0.898, all Cramér's V over thousands of categories; `stroke` had `id` among its features. Numeric features took the regression branch because the target was a boolean or 0/1, so they had no p-value, while the same features get Kruskal-Wallis when the target is a string, as in penguins. The corrected tables put the real signal first: `CryoSleep` 0.469 on spaceship (33% of the sleepers were transported against 82% of the rest), `age` 0.245 on stroke, `flipper_length_mm` 0.882 on penguins.
+- Reports regenerated on `main` after the merges, all without a failed step: the spaceship report (`reports/spaceship_titanic_20260917_112601`) drops from 3 alerts to 2 and from 5 030 to 1 274 outlier rows, and its feature table is led by `CryoSleep`.
+- Known limit left open on purpose and closed by stage 27: a column that is mostly zeros still had no readable chart.
+
+## Stage 27: A column drawn again without the value that fills it
+**Goal**: The gap the review left open. `RoomService` is 0 on 65.5% of its rows, so its histogram is one bar against an axis that runs to 14 327 and its boxplot is a flat line. A log scale cannot fix it, and rule D is right to refuse: it would drop 5 577 of the 8 512 rows without saying so. These are the columns that separate the target most (78.6% of the passengers who spent nothing were transported, against 29.9% of those who spent something).
+
+**Success Criteria**:
+- The histogram and the boxplot of such a column are drawn twice in one image: the whole column on the left, what is left of it once that value is set aside on the right, with a log scale when the rest asks for one.
+- The figure says which value was set aside and how much of the column it was.
+- Three conditions decide it: the lowest value repeats on at least 25% of the rows, the rest holds more than 20 distinct values, and the whole column's chart is squeezed by rule D's own measurement.
+- A column that already gets a log panel is not split, so nothing is drawn three times.
+- The measurements are in `summary.json → floor_split_columns` and the report explains the rule.
+- `ruff check .` and `ruff format --check .` are clean, with no warnings.
+
+**Tests** (all failed before the code existed):
+- `tests/test_modules.py::TestFloorSplit`: 10 tests (a column of mostly zeros is split and the rest carries its own log scale; a column that already gets a log panel is not; a few values at the floor split nothing; the rest must be more than a handful of values; a chart that already reads well is not split; too few values to judge; only continuous columns are considered; the whole column stays beside the split histogram and boxplot).
+- `tests/test_integration.py::TestOutputCompleteness::test_a_column_filled_by_zeros_is_drawn_again_without_them`.
+
+**Status**: COMPLETE. PR #37 was merged on 2026-09-17 as `1cd02a0`, and its branch was deleted.
+
+Verified with real output:
+- **315 tests passed** on the branch, 0 failed, no warning under `-W error::UserWarning`, ruff clean (304 + 11 new). `main` after the merge: **315 passed**.
+- Each threshold was measured over the 92 distinct numeric columns of `data/raw` before the rule was written. The 25% share is where the candidates split cleanly: nothing sits between 22.3% (`siniestros.numero_creditos`) and 30.5% (`cobranza.numero_creditos`), and it is the share at which `outlier_detection.pinned_value` already considers a quartile taken over. The 20 distinct values are the threshold the pipeline already uses to tell a distribution from a handful of levels, and it drops `Order_Details.discount_pct` (0 on 77% of the rows and four other values) and `Inventory.waste` (two). The squeezed-chart condition drops the solar columns, which are 0 at night on 27-47% of the rows and still fill their axis by day.
+- The three conditions pick 8 columns across the 24 datasets: the five spending columns of spaceship (62-66% zeros), `credito_asegurado.prima_cedida` (83.8%), `siniestros.monto_recuperado_reaseguro` (66.8%) and `Inventory.waste_pct` (90.2%). No other chart changes, and no column gets both a log panel and a split.
+- Reports regenerated on `main` after the merge, all without a failed step: `reports/spaceship_titanic_20260917_112601` (the five spending columns split and only those), `reports/mx_batch_20260917_112638` (`prima_cedida` in `credito_asegurado`, `monto_recuperado_reaseguro` in `siniestros`) and `reports/healthcare-dataset-stroke-data_20260917_112850` (none: no column of its own is filled by its lowest value) and `reports/Vistara_batch_20260917_113241` (`waste_pct` in `Inventory`, while `discount_pct` stays whole, as the rule intends).
+- Drawing the alternatives before choosing decided two things that the numbers alone did not. A three-panel version (whole, log of everything, the rest) is redundant on `numero_creditos`, where the log panel and the rest panel look almost the same, which is why a column with a log panel is left alone. And a rule keyed only on the share of zeros would have split `discount_pct` into a four-bar chart and the solar columns, which already read well.
