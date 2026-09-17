@@ -782,6 +782,43 @@ class TestDataQuality:
         _, _, alerts = analyze_duplicates(df, duplicate_threshold=threshold)
         assert alerts[0].severity == expected_severity
 
+    # --- Numbers stored as text: what float() accepts is not what a number looks like ---------
+
+    def test_a_column_of_numbers_written_as_text_is_flagged(self):
+        from eda_pipeline.data_quality import detect_numeric_as_text
+
+        df = pd.DataFrame({"rating": ["4.2", "4.0", "3.9", "5", ".5", "1e3", " 42 "]})
+        flagged, alerts = detect_numeric_as_text(df)
+        assert flagged == {"rating": 7}
+        assert alerts[0].column == "rating"
+
+    def test_an_id_with_an_underscore_is_not_a_number(self):
+        """float('0001_01') is 101.0: Python reads '_' as a digit separator, PassengerId does not."""
+        from eda_pipeline.data_quality import detect_numeric_as_text
+
+        df = pd.DataFrame({"PassengerId": [f"{i:04d}_01" for i in range(1, 40)]})
+        flagged, alerts = detect_numeric_as_text(df)
+        assert flagged == {}
+        assert alerts == []
+
+    def test_the_words_float_accepts_are_not_numbers_either(self):
+        from eda_pipeline.data_quality import detect_numeric_as_text
+
+        df = pd.DataFrame({"estado": ["nan", "NaN", "inf", "-Infinity", "nan", "inf"]})
+        assert detect_numeric_as_text(df)[0] == {}
+
+    def test_a_mostly_numeric_column_is_still_flagged(self):
+        from eda_pipeline.data_quality import detect_numeric_as_text
+
+        df = pd.DataFrame({"precio": ["10.5"] * 9 + ["sin dato"]})  # 90%, above the 80% share
+        assert detect_numeric_as_text(df)[0] == {"precio": 9}
+
+    def test_labels_that_only_start_with_digits_are_not_flagged(self):
+        from eda_pipeline.data_quality import detect_numeric_as_text
+
+        df = pd.DataFrame({"codigo": ["64%", "1.2.3", "3 piezas", "2024-01-01", "1,5"]})
+        assert detect_numeric_as_text(df)[0] == {}
+
 
 class TestTargetAnalysis:
     """Test target variable analysis (bug #20: imbalance rule)."""
