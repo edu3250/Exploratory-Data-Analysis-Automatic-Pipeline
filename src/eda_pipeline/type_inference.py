@@ -475,7 +475,7 @@ def apply_column_type_overrides(
         if n_failed > 0:
             result.coercion_failures[col] = n_failed
             logger.warning(
-                f"Columna '{col}': {n_failed} valor(es) no se pudieron convertir a fecha (quedaron como NaT)."
+                f"Column '{col}': {n_failed} value(s) could not be converted to a date (they stayed NaT)."
             )
         types[col] = "datetime"
 
@@ -494,7 +494,7 @@ def apply_column_type_overrides(
 
     if result.unknown_columns:
         logger.warning(
-            "Columna(s) de 'column_types' no encontradas en el dataset: "
+            "Column(s) named in 'column_types' are not in the dataset: "
             + ", ".join(sorted(set(result.unknown_columns)))
         )
 

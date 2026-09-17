@@ -110,7 +110,7 @@ class Config:
 
         if "language" in data:
             warnings.warn(
-                "La clave de configuración 'language' está obsoleta y ya no tiene efecto; será ignorada.",
+                "The 'language' configuration key is obsolete and no longer has any effect; it is ignored.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -127,7 +127,7 @@ class Config:
             if key in data and isinstance(data[key], dict):
                 data[key] = _instantiate_section(dataclass_type, data[key], key)
 
-        _reject_unknown_keys(cls, data, "configuración")
+        _reject_unknown_keys(cls, data, "configuration")
 
         config = cls(**data)
         config.validate()
@@ -158,15 +158,15 @@ class Config:
         _require_ratio("target.class_imbalance_threshold", self.target.class_imbalance_threshold)
         if self.target.target_type is not None and self.target.target_type not in ("classification", "regression"):
             raise ConfigError(
-                f"Valor inválido para 'target.target_type': {self.target.target_type!r}. "
-                "Valores válidos: 'classification', 'regression' o null (auto-detectar)."
+                f"Invalid value for 'target.target_type': {self.target.target_type!r}. "
+                "Valid values: 'classification', 'regression' or null (auto-detect)."
             )
 
         if self.sample_size is not None:
             _require_positive_int("sample_size", self.sample_size)
 
         if self.decimal is not None and self.decimal not in (".", ","):
-            raise ConfigError(f"Valor inválido para 'decimal': {self.decimal!r}. Use '.', ',' o null (auto-detectar).")
+            raise ConfigError(f"Invalid value for 'decimal': {self.decimal!r}. Use '.', ',' or null (auto-detect).")
 
 
 def _valid_field_names(dataclass_or_type: Any) -> set:
@@ -174,13 +174,13 @@ def _valid_field_names(dataclass_or_type: Any) -> set:
 
 
 def _reject_unknown_keys(dataclass_type: Any, data: Dict[str, Any], section: str) -> None:
-    """Raise ConfigError (in Spanish) if `data` has keys not defined on `dataclass_type`."""
+    """Raise ConfigError if `data` has keys not defined on `dataclass_type`."""
     valid_keys = _valid_field_names(dataclass_type)
     unknown = sorted(set(data) - valid_keys)
     if unknown:
         raise ConfigError(
-            f"Clave(s) desconocida(s) en la sección '{section}': {', '.join(unknown)}. "
-            f"Claves válidas: {', '.join(sorted(valid_keys))}."
+            f"Unknown key(s) in the '{section}' section: {', '.join(unknown)}. "
+            f"Valid keys: {', '.join(sorted(valid_keys))}."
         )
 
 
@@ -194,18 +194,18 @@ def _require_ratio(name: str, value: float, allow_zero: bool = False) -> None:
     """Validate that `value` is in (0, 1] (or [0, 1] if allow_zero)."""
     lower_ok = value >= 0 if allow_zero else value > 0
     if not (lower_ok and value <= 1):
-        rango = "[0, 1]" if allow_zero else "(0, 1]"
-        raise ConfigError(f"'{name}' debe estar en el rango {rango}; se recibió {value!r}.")
+        bounds = "[0, 1]" if allow_zero else "(0, 1]"
+        raise ConfigError(f"'{name}' must be within {bounds}; got {value!r}.")
 
 
 def _require_positive(name: str, value: float) -> None:
     if not value > 0:
-        raise ConfigError(f"'{name}' debe ser un número positivo; se recibió {value!r}.")
+        raise ConfigError(f"'{name}' must be a positive number; got {value!r}.")
 
 
 def _require_positive_int(name: str, value: int) -> None:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        raise ConfigError(f"'{name}' debe ser un entero positivo; se recibió {value!r}.")
+        raise ConfigError(f"'{name}' must be a positive integer; got {value!r}.")
 
 
 def load_config_file(path: Path) -> Dict[str, Any]:

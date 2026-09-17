@@ -843,7 +843,7 @@ class TestTargetAnalysis:
 
 
 class TestTargetFeatureTable:
-    """What the «Features más relacionadas con Target» table may hold, and which test produces it."""
+    """What the «Columns Most Related to the Target» table may hold, and which test produces it."""
 
     @staticmethod
     def _frame(n: int = 300, target="bool", seed: int = 0) -> pd.DataFrame:
@@ -1815,7 +1815,7 @@ class TestPreprocessingRecommendations:
         data.update(columns)
         return pd.DataFrame(data)
 
-    # --- convertir -------------------------------------------------------------------------
+    # --- convert ---------------------------------------------------------------------------
 
     def test_numbers_kept_as_text_are_converted_before_anything_else(self):
         # amazon.rating: 1464 numbers read as 28 categories, so the plan offered to encode a rating.
@@ -1829,7 +1829,7 @@ class TestPreprocessingRecommendations:
         assert "300 of its 300 values" in rec[0].evidence
         assert plan[0].step == STEP_CONVERT  # nothing else can be decided until it is a number
 
-    # --- descartar -------------------------------------------------------------------------
+    # --- drop ------------------------------------------------------------------------------
 
     def test_a_column_that_is_almost_all_gaps_is_dropped(self):
         # penguins_lter.Comments: 92.4% missing, and nothing else in the data comes near it.
@@ -1889,7 +1889,7 @@ class TestPreprocessingRecommendations:
         steps = {r.step for r in self._rows(plan, column="cliente_id")}
         assert steps == {STEP_DROP}
 
-    # --- imputar ---------------------------------------------------------------------------
+    # --- impute ----------------------------------------------------------------------------
 
     def test_a_skewed_column_is_imputed_with_the_median_because_the_mean_is_pulled(self):
         from eda_pipeline.recommendations import STEP_IMPUTE
@@ -1943,7 +1943,7 @@ class TestPreprocessingRecommendations:
         plan = self._plan(self._frame())
         assert self._rows(plan, step=STEP_IMPUTE) == []
 
-    # --- codificar -------------------------------------------------------------------------
+    # --- encode ----------------------------------------------------------------------------
 
     def test_a_two_valued_column_becomes_one_zero_one_column(self):
         from eda_pipeline.recommendations import STEP_ENCODE
@@ -2007,7 +2007,7 @@ class TestPreprocessingRecommendations:
         plan = self._plan(self._frame(fecha=pd.date_range("2024-01-01", periods=300)))
         assert {r.column for r in self._rows(plan, step=STEP_ENCODE)} == {"grupo"}
 
-    # --- escalar ---------------------------------------------------------------------------
+    # --- scale -----------------------------------------------------------------------------
 
     def test_scaling_is_called_for_when_the_spreads_are_incomparable(self):
         # cobranza: the widest column spreads 2 100 million times more than the narrowest.
@@ -2100,7 +2100,7 @@ class TestPreprocessingRecommendations:
         assert len(rec) == 1
         assert "log10" in rec[0].action
 
-    # --- target y orden --------------------------------------------------------------------
+    # --- target and ordering ---------------------------------------------------------------
 
     def test_the_target_is_neither_encoded_nor_scaled(self):
         from eda_pipeline.recommendations import STEP_ENCODE, STEP_SCALE

@@ -205,7 +205,7 @@ def _stringify_nested_cells(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
         has_nested = df[col].map(lambda v: isinstance(v, (list, dict))).any()
         if has_nested:
-            logger.info(f"Columna '{col}' contiene listas/diccionarios anidados; se serializan como texto JSON.")
+            logger.info(f"Column '{col}' holds nested lists/dicts; they are stored as JSON text.")
             df[col] = df[col].map(lambda v: json.dumps(v, ensure_ascii=False) if isinstance(v, (list, dict)) else v)
     return df
 
@@ -310,7 +310,7 @@ def load_json(file_path: Path, sample_size: Optional[int] = None) -> pd.DataFram
             records = raw if isinstance(raw, list) else [raw]
             df = pd.json_normalize(records)
         except Exception as e:
-            logger.warning(f"No se pudo interpretar {file_path.name} como JSON regular ({e}); probando JSON Lines.")
+            logger.warning(f"Could not read {file_path.name} as regular JSON ({e}); trying JSON Lines.")
             try:
                 df = pd.read_json(file_path, lines=True, dtype=False)
             except Exception as e2:
@@ -413,7 +413,7 @@ def discover_batch_files(folder_path: Path, pattern: Optional[str] = None) -> li
         if not path.is_file():
             continue
         if path.name.startswith("."):
-            logger.info(f"Omitiendo archivo oculto: {path.name}")
+            logger.info(f"Skipping hidden file: {path.name}")
             continue
         if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
             logger.info(f"Skipping file with an unsupported extension: {path.name}")

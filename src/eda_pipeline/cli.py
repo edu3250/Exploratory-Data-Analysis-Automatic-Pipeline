@@ -55,7 +55,7 @@ def _run_and_report(final_config: Config, verbose: bool) -> None:
     results = pipeline.run()
 
     if pipeline.batch_output_dir is not None:
-        click.secho(f"📁 Carpeta del lote: {pipeline.batch_output_dir}", fg="cyan")
+        click.secho(f"📁 Batch folder: {pipeline.batch_output_dir}", fg="cyan")
 
     if "error" in results and len(results) == 1:
         click.secho(f"Error: {results['error']}", fg="red")
@@ -69,18 +69,18 @@ def _run_and_report(final_config: Config, verbose: bool) -> None:
             continue
 
         if result.get("failed_steps"):
-            click.secho(f"⚠️  {dataset_name}: completado con errores parciales", fg="yellow")
-            click.echo(f"   Pasos con error: {', '.join(result['failed_steps'])}")
+            click.secho(f"⚠️  {dataset_name}: finished, but some steps failed", fg="yellow")
+            click.echo(f"   Failed steps: {', '.join(result['failed_steps'])}")
             any_failed = True
         else:
             click.secho(f"✅ {dataset_name}", fg="green")
 
-        click.echo(f"   Reporte HTML: {result.get('html_report') or '(no generado)'}")
-        click.echo(f"   Resumen JSON: {result['summary_json']}")
-        click.echo(f"   Alertas: {result['n_alerts']} | Gráficos: {result['n_plots']}")
+        click.echo(f"   HTML report: {result.get('html_report') or '(not generated)'}")
+        click.echo(f"   JSON summary: {result['summary_json']}")
+        click.echo(f"   Alerts: {result['n_alerts']} | Charts: {result['n_plots']}")
 
     if not results:
-        click.secho("No se encontraron archivos para procesar.", fg="yellow")
+        click.secho("No files found to process.", fg="yellow")
 
     if any_failed:
         sys.exit(1)
@@ -89,27 +89,27 @@ def _run_and_report(final_config: Config, verbose: bool) -> None:
 @click.group()
 @click.version_option(version="0.1.0")
 def cli():
-    """Análisis Exploratorio de Datos (EDA) - Pipeline Completo"""
+    """Exploratory Data Analysis (EDA) - the complete pipeline."""
     pass
 
 
 @cli.command()
 @click.argument("input_file", type=click.Path(exists=True))
-@click.option("--config", type=click.Path(exists=True), help="Ruta a archivo YAML de configuración")
-@click.option("--output-dir", default=None, help="Directorio de salida para reportes (por defecto: reports)")
-@click.option("--target", help="Columna target para análisis")
+@click.option("--config", type=click.Path(exists=True), help="Path to a YAML configuration file")
+@click.option("--output-dir", default=None, help="Where to write the reports (default: reports)")
+@click.option("--target", help="Target column to analyze")
 @click.option(
     "--target-type",
     type=click.Choice(["classification", "regression"]),
-    help="Tipo de target (auto-detectar si no se especifica)",
+    help="Target type (auto-detected if not given)",
 )
-@click.option("--delimiter", help="Delimitador de CSV (auto-detectar si no se especifica)")
-@click.option("--encoding", help="Codificación de archivo (auto-detectar si no se especifica)")
-@click.option("--decimal", type=click.Choice([".", ","]), help="Separador decimal (auto-detectar si no se especifica)")
-@click.option("--sheet", help="Hoja de Excel: nombre, o índice si es solo dígitos (por defecto: la primera)")
-@click.option("--sample-size", type=int, help="Tamaño de muestra para datasets grandes")
-@click.option("--strict", is_flag=True, default=False, help="Modo estricto: fallar en el primer error")
-@click.option("--verbose", is_flag=True, default=False, help="Logging detallado (nivel DEBUG)")
+@click.option("--delimiter", help="CSV delimiter (auto-detected if not given)")
+@click.option("--encoding", help="File encoding (auto-detected if not given)")
+@click.option("--decimal", type=click.Choice([".", ","]), help="Decimal separator (auto-detected if not given)")
+@click.option("--sheet", help="Excel sheet: a name, or an index if all digits (default: the first)")
+@click.option("--sample-size", type=int, help="Sample size for large datasets")
+@click.option("--strict", is_flag=True, default=False, help="Strict mode: stop at the first error")
+@click.option("--verbose", is_flag=True, default=False, help="Detailed logging (DEBUG level)")
 def analyze_file(
     input_file,
     config,
@@ -125,9 +125,10 @@ def analyze_file(
     verbose,
 ):
     """
-    Analizar un archivo de datos individual.
+    Analyze a single data file.
 
-    EJEMPLO:
+    \b
+    EXAMPLES:
         eda analyze-file data.csv
         eda analyze-file data.csv --target target_col --output-dir ./my_reports
         eda analyze-file data.xlsx --sheet 1 --target category
@@ -155,7 +156,7 @@ def analyze_file(
         _run_and_report(final_config, verbose)
 
     except ConfigError as e:
-        click.secho(f"Error de configuración: {e}", fg="red")
+        click.secho(f"Configuration error: {e}", fg="red")
         sys.exit(2)
     except Exception as e:
         click.secho(f"Error: {e}", fg="red")
@@ -167,23 +168,23 @@ def analyze_file(
 @cli.command()
 @click.argument("input_folder", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option(
-    "--pattern", default=None, help="Patrón glob para archivos (por defecto: todas las extensiones soportadas)"
+    "--pattern", default=None, help="Glob pattern for the files (default: every supported extension)"
 )
-@click.option("--config", type=click.Path(exists=True), help="Ruta a archivo YAML de configuración")
-@click.option("--output-dir", default=None, help="Directorio de salida para reportes (por defecto: reports)")
-@click.option("--target", help="Columna target para análisis")
+@click.option("--config", type=click.Path(exists=True), help="Path to a YAML configuration file")
+@click.option("--output-dir", default=None, help="Where to write the reports (default: reports)")
+@click.option("--target", help="Target column to analyze")
 @click.option(
     "--target-type",
     type=click.Choice(["classification", "regression"]),
-    help="Tipo de target (auto-detectar si no se especifica)",
+    help="Target type (auto-detected if not given)",
 )
-@click.option("--delimiter", help="Delimitador de CSV (auto-detectar si no se especifica)")
-@click.option("--encoding", help="Codificación de archivo (auto-detectar si no se especifica)")
-@click.option("--decimal", type=click.Choice([".", ","]), help="Separador decimal (auto-detectar si no se especifica)")
-@click.option("--sheet", help="Hoja de Excel: nombre, o índice si es solo dígitos (por defecto: la primera)")
-@click.option("--sample-size", type=int, help="Tamaño de muestra para datasets grandes")
-@click.option("--strict", is_flag=True, default=False, help="Modo estricto: fallar en el primer error")
-@click.option("--verbose", is_flag=True, default=False, help="Logging detallado (nivel DEBUG)")
+@click.option("--delimiter", help="CSV delimiter (auto-detected if not given)")
+@click.option("--encoding", help="File encoding (auto-detected if not given)")
+@click.option("--decimal", type=click.Choice([".", ","]), help="Decimal separator (auto-detected if not given)")
+@click.option("--sheet", help="Excel sheet: a name, or an index if all digits (default: the first)")
+@click.option("--sample-size", type=int, help="Sample size for large datasets")
+@click.option("--strict", is_flag=True, default=False, help="Strict mode: stop at the first error")
+@click.option("--verbose", is_flag=True, default=False, help="Detailed logging (DEBUG level)")
 def analyze_batch(
     input_folder,
     pattern,
@@ -200,13 +201,14 @@ def analyze_batch(
     verbose,
 ):
     """
-    Analizar múltiples archivos en un folder.
+    Analyze every supported file in a folder.
 
-    Los archivos ocultos y con extensión no soportada se omiten (con aviso);
-    un archivo que falla se reporta con ❌ y el resto del lote continúa,
-    salvo que se use --strict.
+    Hidden files and unsupported extensions are skipped (with a warning);
+    a file that fails is reported with ❌ and the rest of the batch carries
+    on, unless --strict is used.
 
-    EJEMPLO:
+    \b
+    EXAMPLES:
         eda analyze-batch ./data
         eda analyze-batch ./data --pattern "*.csv" --target target_col
         eda analyze-batch ./raw_data --output-dir ./my_reports
@@ -235,7 +237,7 @@ def analyze_batch(
         _run_and_report(final_config, verbose)
 
     except ConfigError as e:
-        click.secho(f"Error de configuración: {e}", fg="red")
+        click.secho(f"Configuration error: {e}", fg="red")
         sys.exit(2)
     except Exception as e:
         click.secho(f"Error: {e}", fg="red")
@@ -245,20 +247,21 @@ def analyze_batch(
 
 
 @cli.command()
-@click.option("--output", default="config/default.yaml", help="Ruta del archivo de configuración a crear")
+@click.option("--output", default="config/default.yaml", help="Path of the configuration file to create")
 def init_config(output):
     """
-    Crear un archivo de configuración de plantilla.
+    Create a template configuration file.
 
-    EJEMPLO:
+    \b
+    EXAMPLES:
         eda init-config
         eda init-config --output my_config.yaml
     """
     try:
         output_path = Path(output)
         create_default_config_file(output_path)
-        click.secho(f"✅ Configuración creada: {output_path}", fg="green")
-        click.echo(f"Edite este archivo y úselo con: eda analyze-file <archivo> --config {output}")
+        click.secho(f"✅ Configuration created: {output_path}", fg="green")
+        click.echo(f"Edit it, then use it with: eda analyze-file <file> --config {output}")
     except Exception as e:
         click.secho(f"Error: {e}", fg="red")
         sys.exit(1)

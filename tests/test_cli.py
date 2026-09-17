@@ -44,7 +44,7 @@ class TestAnalyzeFile:
 
         assert result.exit_code == 0, result.output
         assert "data" in result.output
-        assert "Reporte HTML" in result.output
+        assert "   HTML report:" in result.output  # the CLI's own summary line, not the log line
 
     def test_missing_file_is_a_usage_error(self, runner, tmp_output_dir):
         result = runner.invoke(cli, ["analyze-file", str(tmp_output_dir / "no_existe.csv")])
@@ -147,7 +147,7 @@ class TestAnalyzeFile:
         result = runner.invoke(cli, ["analyze-file", str(csv_path), "--config", str(config_path)])
 
         assert result.exit_code == 2
-        assert "configuración" in result.output
+        assert "Configuration error" in result.output
 
 
 class TestAnalyzeBatch:
@@ -244,3 +244,40 @@ class TestInitConfig:
         loaded = yaml.safe_load(output_path.read_text(encoding="utf-8"))
         assert "data_quality" in loaded
         assert "language" not in loaded
+
+
+class TestHelpExamples:
+    """
+    The EXAMPLES block of each --help must stay one command per line.
+
+    Click rewraps every paragraph of a docstring to the terminal width unless
+    the paragraph is preceded by a \b marker, which turns three readable
+    commands into one unreadable run-on line.
+    """
+
+    @pytest.mark.parametrize(
+        ("command", "example"),
+        [
+            ("analyze-file", "eda analyze-file data.csv --target target_col --output-dir ./my_reports"),
+            ("analyze-batch", 'eda analyze-batch ./data --pattern "*.csv" --target target_col'),
+            ("init-config", "eda init-config --output my_config.yaml"),
+        ],
+    )
+    def test_each_example_stays_on_its_own_line(self, runner, command, example):
+        result = runner.invoke(cli, [command, "--help"])
+
+        assert result.exit_code == 0
+        assert example in result.output
+
+    @pytest.mark.parametrize("command", ["analyze-file", "analyze-batch", "init-config"])
+    def test_the_marker_itself_never_reaches_the_terminal(self, runner, command):
+        result = runner.invoke(cli, [command, "--help"])
+
+        assert "\b" not in result.output  # the literal backspace character, consumed by Click
+
+    def test_the_batch_description_is_still_wrapped_prose(self, runner):
+        """Only the examples are preformatted; the paragraph above them must still reflow."""
+        result = runner.invoke(cli, ["analyze-batch", "--help"])
+
+        assert "Hidden files and unsupported extensions are skipped" in result.output
+        assert "EXAMPLES:" in result.output

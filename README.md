@@ -131,8 +131,6 @@ correlation id, the step is listed in `summary.json → failed_steps` and the re
 
 ## Notes and roadmap
 
-- **The CLI messages are still Spanish** (`--help`, the console output and the logs). The report
-  itself — every section, chart, table and recommendation — is English; the CLI is next.
 - Reports are self-contained, so they get large on very wide datasets (>100 columns). Chart counts
   are configurable.
 - Next: generated scikit-learn preprocessing code, ordinal levels declared in the config, missingness
