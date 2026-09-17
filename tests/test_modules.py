@@ -1303,6 +1303,110 @@ class TestLogScale:
         assert output.exists()
 
 
+class TestFloorSplit:
+    """A repeated lowest value hides the rest of the column, and a log scale cannot fix a zero."""
+
+    @staticmethod
+    def _spending(zeros: int = 650, spenders: int = 350, seed: int = 0) -> pd.Series:
+        """Like RoomService: most rows spend nothing, the rest spend amounts spread over decades."""
+        rng = np.random.default_rng(seed)
+        spent = rng.lognormal(mean=4.0, sigma=1.3, size=spenders)
+        return pd.Series(np.concatenate([np.zeros(zeros), spent]), name="RoomService")
+
+    def test_a_column_of_mostly_zeros_is_split(self):
+        from eda_pipeline.visualizations import check_floor_split
+
+        check = check_floor_split(self._spending())
+        assert check.needed
+        assert check.floor == 0.0
+        assert check.floor_count == 650
+        assert check.floor_pct == pytest.approx(65.0)
+        assert check.rest_count == 350
+
+    def test_the_rest_carries_its_own_log_scale_when_it_needs_one(self):
+        from eda_pipeline.visualizations import check_floor_split
+
+        assert check_floor_split(self._spending()).rest_log
+
+    def test_a_column_that_already_gets_a_log_panel_is_not_split(self):
+        """numero_creditos repeats its minimum on 55% of the rows, but its minimum is 1, so the log works."""
+        from eda_pipeline.visualizations import check_floor_split, check_log_scale
+
+        rng = np.random.default_rng(0)
+        values = pd.Series(np.concatenate([np.ones(550), rng.lognormal(mean=3, sigma=2.0, size=450)]), name="creditos")
+        assert check_log_scale(values).needed
+        assert not check_floor_split(values).needed
+
+    def test_a_few_values_at_the_floor_do_not_split_anything(self):
+        from eda_pipeline.visualizations import check_floor_split
+
+        check = check_floor_split(self._spending(zeros=50, spenders=950))
+        assert not check.needed
+        assert check.floor_pct == pytest.approx(5.0)
+
+    def test_the_rest_must_be_more_than_a_handful_of_values(self):
+        """Order_Details.discount_pct is 0 on 77% of the rows and holds four other values."""
+        from eda_pipeline.visualizations import check_floor_split
+
+        tiers = [0.0] * 77 + [0.1] * 17 + [0.2] * 3 + [0.3] * 3
+        values = pd.Series([tiers[i % 100] for i in range(600)], name="discount_pct")
+        assert not check_floor_split(values).needed
+
+    def test_a_chart_that_already_reads_well_is_not_split(self):
+        """The solar data is 0 at night, and the daytime values still fill the axis."""
+        from eda_pipeline.visualizations import check_floor_split
+
+        rng = np.random.default_rng(1)
+        values = pd.Series(np.concatenate([np.zeros(460), rng.uniform(0, 1000, 540)]), name="AC_POWER")
+        assert not check_floor_split(values).needed
+
+    def test_too_few_values_to_judge(self):
+        from eda_pipeline.visualizations import check_floor_split
+
+        assert check_floor_split(pd.Series([0.0] * 8 + [1.0, 2.0], name="corta")) is None
+
+    def test_only_continuous_columns_are_considered(self):
+        from eda_pipeline.visualizations import floor_split_columns
+
+        df = pd.DataFrame(
+            {
+                "gasto": self._spending(),
+                "grupo": [["a", "b"][i % 2] for i in range(1000)],
+                "conteo": [i % 4 for i in range(1000)],
+            }
+        )
+        chosen = floor_split_columns(
+            df, {"gasto": "numeric_continuous", "grupo": "categorical", "conteo": "numeric_discrete"}
+        )
+        assert set(chosen) == {"gasto"}
+
+    def test_the_whole_column_stays_beside_the_split_histogram(self, tmp_output_dir):
+        from eda_pipeline.visualizations import check_floor_split, plot_histogram
+
+        series = self._spending()
+        plain = tmp_output_dir / "hist_plain.png"
+        split = tmp_output_dir / "hist_split.png"
+        assert plot_histogram(series, plain)
+        assert plot_histogram(series, split, floor_split=check_floor_split(series))
+
+        import matplotlib.image as mpimg
+
+        assert mpimg.imread(split).shape[1] > 1.5 * mpimg.imread(plain).shape[1]
+
+    def test_the_split_boxplot_keeps_both_panels(self, tmp_output_dir):
+        from eda_pipeline.visualizations import check_floor_split, plot_boxplot
+
+        series = self._spending()
+        plain = tmp_output_dir / "box_plain.png"
+        split = tmp_output_dir / "box_split.png"
+        assert plot_boxplot(series, plain)
+        assert plot_boxplot(series, split, floor_split=check_floor_split(series))
+
+        import matplotlib.image as mpimg
+
+        assert mpimg.imread(split).shape[1] > 1.4 * mpimg.imread(plain).shape[1]
+
+
 class TestPairPlot:
     """One pair plot of the numeric variables, coloured by the group that best separates them."""
 

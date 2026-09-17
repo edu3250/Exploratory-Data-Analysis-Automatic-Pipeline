@@ -32,7 +32,12 @@ from .type_inference import (
     infer_all_types,
 )
 from .univariate_analysis import UnivariateReport, analyze_univariate
-from .visualizations import choose_pair_plot, generate_all_visualizations, log_scale_columns
+from .visualizations import (
+    choose_pair_plot,
+    floor_split_columns,
+    generate_all_visualizations,
+    log_scale_columns,
+)
 
 
 class TargetColumnNotFoundError(ValueError):
@@ -423,6 +428,11 @@ class EDAPipeline:
         self.logger.info("Checking which columns need a log scale...")
         log_scale = self._run_step("log_scale", failed_steps, log_scale_columns, df, column_types, default={}) or {}
 
+        self.logger.info("Checking which columns are filled by their lowest value...")
+        floor_split = (
+            self._run_step("floor_split", failed_steps, floor_split_columns, df, column_types, default={}) or {}
+        )
+
         self.logger.info("Choosing the pair plot...")
         pair_plot = self._run_step(
             "pair_plot",
@@ -477,6 +487,7 @@ class EDAPipeline:
                 time_cols=time_cols,
                 pair_plot=pair_plot,
                 log_scale=log_scale,
+                floor_split=floor_split,
                 default={},
             )
             or {}
@@ -542,6 +553,7 @@ class EDAPipeline:
             time_stats=univariate_report.time_stats,
             pair_plot=pair_plot,
             log_scale_columns=list(log_scale),
+            floor_split_columns={col: asdict(check) for col, check in floor_split.items()},
             recommendations=recommendations,
             default=None,
         )
@@ -597,6 +609,7 @@ class EDAPipeline:
             },
             "pair_plot": asdict(pair_plot) if pair_plot else None,
             "log_scale_columns": {col: asdict(check) for col, check in log_scale.items()},
+            "floor_split_columns": {col: asdict(check) for col, check in floor_split.items()},
             "recommendations": [asdict(rec) for rec in recommendations],
             "failed_steps": failed_steps,
         }

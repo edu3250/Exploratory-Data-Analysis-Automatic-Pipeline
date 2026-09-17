@@ -584,6 +584,38 @@ class TestOutputCompleteness:
         assert "escala logarítmica" in html
         assert html.count('alt="Pair plot') == 2  # the linear pair plot stays, the log one follows it
 
+    def test_a_column_filled_by_zeros_is_drawn_again_without_them(self, tmp_output_dir):
+        """RoomService is 0 on 65% of the rows: its histogram was one bar against an axis to 14 327."""
+        import matplotlib.image as mpimg
+        import numpy as np
+
+        rng = np.random.default_rng(0)
+        n = 900
+        gasto = np.concatenate([np.zeros(600), rng.lognormal(mean=4.0, sigma=1.3, size=300)])
+        df = pd.DataFrame({"gasto": gasto, "edad": rng.normal(40, 12, n)})
+        csv_file = tmp_output_dir / "pasajeros.csv"
+        df.to_csv(csv_file, index=False)
+        pipeline = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir))
+        results = pipeline.run()
+
+        result = results["pasajeros"]
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        assert summary["failed_steps"] == []
+        assert set(summary["floor_split_columns"]) == {"gasto"}  # edad has no repeated floor
+        split = summary["floor_split_columns"]["gasto"]
+        assert split["floor"] == 0.0
+        assert split["floor_count"] == 600
+        assert split["rest_count"] == 300
+        assert split["rest_log"] is True
+
+        plots_dir = Path(result["output_dir"]) / "plots"
+        width = {name: mpimg.imread(plots_dir / name).shape[1] for name in ("histogram_gasto.png", "histogram_edad.png")}
+        assert width["histogram_gasto.png"] > 1.5 * width["histogram_edad.png"]  # both panels in one image
+
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        assert "Sin el valor que las llena" in html  # the boxplot note
+        assert "66.7% de las filas" in html
+
     def test_pair_plot_follows_the_scatter_plots_and_names_its_group(self, tmp_output_dir):
         """A pair plot of the numeric variables, coloured by the group that separates them, below the scatter plots."""
         n = 240

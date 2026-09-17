@@ -419,6 +419,16 @@ del 14-22 % al 2-10 %, y ninguna otra columna cambia.
   a la derecha de la lineal, en la misma imagen; el pair plot se repite debajo con log10 en esas columnas.
   Los puntos con valor 0 o negativo quedan fuera del panel logarítmico y se indica cuántos. La medición
   de cada columna elegida queda en `summary.json → log_scale_columns`.
+- **Columnas llenas de su valor más bajo**: cuando un mismo valor ocupa el fondo de la columna, aplasta
+  todo lo demás, y si ese valor es 0 la escala logarítmica no puede arreglarlo (la regla D la descarta
+  justamente porque dejaría fuera la mayoría de las filas). En ese caso el histograma y el boxplot se
+  dibujan dos veces en la misma imagen: la columna completa a la izquierda y lo que queda sin ese valor
+  a la derecha, con escala logarítmica si lo que queda la pide. Se hace cuando se cumplen tres cosas:
+  el valor más bajo se repite en al menos el 25 % de las filas, lo que queda tiene más de 20 valores
+  distintos (por debajo de eso son niveles, no una distribución) y el gráfico completo está aplastado
+  según la misma medición de la regla D. Sobre los 24 datasets elige 8 columnas: las cinco de gasto de
+  Spaceship Titanic (62-66 % en 0), `prima_cedida`, `monto_recuperado_reaseguro` y `waste_pct`. Queda
+  en `summary.json → floor_split_columns`.
 - **Pair plot**: debajo de los gráficos de dispersión, un pair plot con las columnas numéricas continuas
   (hace falta al menos 3; si hay más de 6, las 6 con correlaciones más fuertes). Cada panel cruza dos
   variables y la diagonal muestra la distribución de cada una. Se colorea por grupo cuando hay uno que
