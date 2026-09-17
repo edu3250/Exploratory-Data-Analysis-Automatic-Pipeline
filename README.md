@@ -18,17 +18,27 @@ without them — that is the only way its distribution is visible at all.</sub>
 
 ---
 
-## Quick start
+## How to use
 
 ```bash
 python -m venv .venv && .venv/Scripts/activate   # source .venv/bin/activate on Linux/macOS
 python -m pip install -e .
 
-# any CSV, TSV, Excel, Parquet or JSON file; --target is optional
-python -m eda_pipeline analyze-file your_data.csv --target your_label_column
+# one file — CSV, TSV, Excel, Parquet or JSON; --target is optional
+eda analyze-file your_data.csv --target your_label_column
+
+# every supported file in a folder, in one run; a file that fails does not abort the rest
+eda analyze-batch data/raw/
+
+# a YAML you can edit: delimiters, encodings, column types, thresholds, which charts to draw
+eda init-config
 ```
 
-That writes one folder under `reports/`:
+Delimiter, encoding, decimal separator and column types are detected on their own; `--delimiter`,
+`--encoding`, `--decimal`, `--sheet`, `--sample-size` and `--output-dir` override that when you need
+to. `eda --help` has the rest.
+
+Each run writes one folder under `reports/`:
 
 ```
 reports/your_data_20260917_112601/
@@ -38,16 +48,8 @@ reports/your_data_20260917_112601/
 └── tables/          # 7 CSV tables (stats, correlations, outliers, alerts, the plan)
 ```
 
-The report in the screenshot came from Kaggle's Spaceship Titanic training file. `data/` is not
-tracked, so bring your own — the pipeline detects delimiter, encoding, decimal separator and column
-types on its own.
-
-`analyze-batch <folder>` does the same for every supported file in a folder (CSV, TSV, Excel,
-Parquet, JSON/JSONL), grouping the reports of one run into a single folder. A file that fails does
-not abort the rest. `init-config` writes a YAML you can edit to override anything: delimiters,
-encodings, column types, thresholds, which charts to draw.
-
-Run `python -m eda_pipeline --help` for the rest.
+`data/` is not tracked, so bring your own file — the one in the screenshot is Kaggle's Spaceship
+Titanic training set.
 
 ## What the report contains
 
