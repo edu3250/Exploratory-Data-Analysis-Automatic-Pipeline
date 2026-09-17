@@ -130,6 +130,82 @@ def check_log_scale(series: pd.Series) -> LogScaleCheck | None:
     )
 
 
+# A log scale cannot fix a column whose lowest value is 0: rule D refuses it precisely because
+# dropping those rows would hide most of the column. On the spaceship titanic data RoomService is 0 on
+# 65% of the rows, and its histogram is one bar at 0 against an axis that runs to 14 327. The rest of
+# the column is a distribution of its own, so it is drawn beside the whole one.
+#
+# Measured over the 92 distinct numeric columns of data/raw, three conditions together pick 8 columns
+# and leave every other chart alone:
+#   - the lowest value repeats on at least a quarter of the rows. The candidates split cleanly there:
+#     nothing between 22.3% (siniestros.numero_creditos) and 30.5% (cobranza.numero_creditos). It is
+#     the same share at which outlier_detection.pinned_value considers a quartile taken over.
+#   - the rest holds more than 20 distinct values, the threshold above which a number is a
+#     distribution and not a handful of levels. This drops Order_Details.discount_pct (0 on 77% of
+#     the rows and four other values) and Inventory.waste (two).
+#   - the whole column's chart is squeezed, by the same measurement rule D makes. This drops the solar
+#     columns, which are 0 at night (27-47% of the rows) and still fill their axis by day.
+FLOOR_SPLIT_MIN_SHARE = 25.0
+FLOOR_SPLIT_MIN_DISTINCT = 20
+
+
+@dataclass
+class FloorSplitCheck:
+    """How much of a column sits on its lowest value, and what is left once it is set aside."""
+
+    needed: bool
+    floor: float
+    floor_count: int
+    floor_pct: float
+    rest_count: int
+    rest_distinct: int
+    rest_log: bool  # the rest asks for a log scale of its own
+
+
+def check_floor_split(series: pd.Series) -> FloorSplitCheck | None:
+    """Measure the rule on a numeric column; None when it has too few values to judge."""
+    values = pd.to_numeric(series, errors="coerce").dropna().astype(float).to_numpy()
+    if len(values) < LOG_SCALE_MIN_VALUES:
+        return None
+
+    floor = float(values.min())
+    at_floor = int((values == floor).sum())
+    floor_pct = at_floor / len(values) * 100
+    rest = values[values > floor]
+    rest_check = check_log_scale(pd.Series(rest)) if len(rest) >= LOG_SCALE_MIN_VALUES else None
+    rest_log = bool(rest_check.needed) if rest_check else False
+
+    log_check = check_log_scale(series)
+    needed = (
+        not (log_check is not None and log_check.needed)  # a log panel already opens the column up
+        and floor_pct >= FLOOR_SPLIT_MIN_SHARE
+        and len(rest) >= LOG_SCALE_MIN_VALUES
+        and len(np.unique(rest)) > FLOOR_SPLIT_MIN_DISTINCT
+        and _central_share(values) < LOG_SCALE_MAX_CENTRAL_SHARE
+    )
+    return FloorSplitCheck(
+        needed=needed,
+        floor=floor,
+        floor_count=at_floor,
+        floor_pct=floor_pct,
+        rest_count=len(rest),
+        rest_distinct=int(len(np.unique(rest))),
+        rest_log=rest_log,
+    )
+
+
+def floor_split_columns(df: pd.DataFrame, column_types: dict[str, str]) -> dict[str, FloorSplitCheck]:
+    """The continuous columns drawn again without their repeated lowest value, with their measurements."""
+    chosen = {}
+    for col, semantic_type in column_types.items():
+        if semantic_type != "numeric_continuous" or col not in df.columns:
+            continue
+        check = check_floor_split(df[col])
+        if check is not None and check.needed:
+            chosen[col] = check
+    return chosen
+
+
 def log_scale_columns(df: pd.DataFrame, column_types: dict[str, str]) -> dict[str, LogScaleCheck]:
     """The continuous columns that rule D puts on a log scale, with their measurements."""
     chosen = {}
@@ -142,18 +218,45 @@ def log_scale_columns(df: pd.DataFrame, column_types: dict[str, str]) -> dict[st
     return chosen
 
 
+def _floor_panel_title(check: FloorSplitCheck) -> str:
+    """What the right panel of a split chart is showing."""
+    scale = ", escala logarítmica" if check.rest_log else ""
+    return f"Sin el valor {check.floor:g}: {check.rest_count} filas{scale}"
+
+
+def _floor_figure_note(check: FloorSplitCheck, name: object) -> str:
+    return f"{name}: el valor {check.floor:g} ocupa el {check.floor_pct:.1f}% de las filas ({check.floor_count})"
+
+
 def _log_panel_title(dropped: int) -> str:
     return "Escala logarítmica" + (f" ({dropped} valores ≤ 0 fuera)" if dropped else "")
 
 
 @safe_plot
-def plot_histogram(series: pd.Series, output_path: Path, log_scale: bool = False) -> bool:
-    """Histogram with KDE; with log_scale, the linear one on the left and the log one on the right."""
+def plot_histogram(series: pd.Series, output_path: Path, log_scale: bool = False, floor_split=None) -> bool:
+    """
+    Histogram with KDE.
+
+    With log_scale, the linear one on the left and the log one on the right. With floor_split, the
+    whole column on the left and what is left of it, once its repeated lowest value is set aside, on
+    the right.
+    """
     valid = series.dropna()
     if len(valid) < 2:
         return False
 
-    if not log_scale:
+    if floor_split is not None:
+        fig, (whole, rest_ax) = plt.subplots(1, 2, figsize=(16, 6))
+        _draw_histogram(whole, valid)
+        whole.set_title("Columna completa")
+        whole.set_xlabel(series.name)
+        rest = valid[valid > floor_split.floor].astype(float)
+        sns.histplot(rest, kde=True, ax=rest_ax, bins=30, log_scale=floor_split.rest_log)
+        rest_ax.set_title(_floor_panel_title(floor_split))
+        rest_ax.set_xlabel(f"{series.name} > {floor_split.floor:g}")
+        rest_ax.set_ylabel("Frecuencia")
+        fig.suptitle(_floor_figure_note(floor_split, series.name))
+    elif not log_scale:
         fig, ax = plt.subplots(figsize=(10, 6))
         _draw_histogram(ax, valid)
         ax.set_title(f"Distribución: {series.name}")
@@ -183,13 +286,29 @@ def _draw_histogram(ax, valid: pd.Series) -> None:
 
 
 @safe_plot
-def plot_boxplot(series: pd.Series, output_path: Path, log_scale: bool = False) -> bool:
-    """Boxplot; with log_scale, the linear one on the left and the log one on the right."""
+def plot_boxplot(series: pd.Series, output_path: Path, log_scale: bool = False, floor_split=None) -> bool:
+    """
+    Boxplot.
+
+    With log_scale, the linear one on the left and the log one on the right. With floor_split, the
+    whole column on the left and what is left of it without its repeated lowest value on the right.
+    """
     valid = series.dropna()
     if len(valid) < 2:
         return False
 
-    if not log_scale:
+    if floor_split is not None:
+        fig, (whole, rest_ax) = plt.subplots(1, 2, figsize=(14, 6))
+        rest = valid[valid > floor_split.floor].astype(float)
+        with _suppress_seaborn_boxplot_warning():
+            sns.boxplot(y=valid, ax=whole)
+            sns.boxplot(y=rest, ax=rest_ax, log_scale=floor_split.rest_log)
+        whole.set_title("Columna completa")
+        whole.set_ylabel(series.name)
+        rest_ax.set_title(_floor_panel_title(floor_split))
+        rest_ax.set_ylabel(f"{series.name} > {floor_split.floor:g}")
+        fig.suptitle(_floor_figure_note(floor_split, series.name))
+    elif not log_scale:
         fig, ax = plt.subplots(figsize=(8, 6))
         with _suppress_seaborn_boxplot_warning():
             sns.boxplot(y=valid, ax=ax)
@@ -892,6 +1011,7 @@ def generate_all_visualizations(
     time_cols: list[str] | None = None,
     pair_plot: PairPlotSpec | None = None,
     log_scale: dict[str, LogScaleCheck] | None = None,
+    floor_split: dict[str, FloorSplitCheck] | None = None,
 ) -> dict[str, list[str]]:
     """
     Generate all standard visualizations.
@@ -905,12 +1025,14 @@ def generate_all_visualizations(
     # Numeric columns: histograms and boxplots
     # Columns rule D puts on a log scale get it next to the linear chart, never instead of it
     log_cols = set(log_scale or {})
+    # Columns whose lowest value fills them are drawn again without it, beside the whole column
+    splits = floor_split or {}
 
     logger.info(f"Generating {len(numeric_cols)} histograms...")
     hist_files = []
     for col in numeric_cols[: config_viz.max_histograms]:
         output_file = output_dir / f"histogram_{col.replace('/', '_')}.png"
-        if plot_histogram(df[col], output_file, log_scale=col in log_cols):
+        if plot_histogram(df[col], output_file, log_scale=col in log_cols, floor_split=splits.get(col)):
             hist_files.append(str(output_file))
     plot_files["histograms"] = hist_files
 
@@ -918,7 +1040,7 @@ def generate_all_visualizations(
     box_files = []
     for col in numeric_cols[: config_viz.max_boxplots]:
         output_file = output_dir / f"boxplot_{col.replace('/', '_')}.png"
-        if plot_boxplot(df[col], output_file, log_scale=col in log_cols):
+        if plot_boxplot(df[col], output_file, log_scale=col in log_cols, floor_split=splits.get(col)):
             box_files.append(str(output_file))
     plot_files["boxplots"] = box_files
 

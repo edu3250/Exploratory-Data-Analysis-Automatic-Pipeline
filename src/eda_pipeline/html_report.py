@@ -13,7 +13,12 @@ from jinja2 import Template
 
 from .recommendations import recommendations_by_step
 from .type_inference import dtype_label, semantic_type_label
-from .visualizations import PAIR_PLOT_MIN_HUE_ETA, PIE_MAX_CATEGORIES
+from .visualizations import (
+    FLOOR_SPLIT_MIN_DISTINCT,
+    FLOOR_SPLIT_MIN_SHARE,
+    PAIR_PLOT_MIN_HUE_ETA,
+    PIE_MAX_CATEGORIES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -665,6 +670,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if plots.histograms %}
         <h3>Distribuciones Numéricas ({{ plots.histograms | length }})</h3>
+        {% if floor_split_columns %}
+        <p style="color: #555; margin-top: -8px;">
+            Dibujadas otra vez sin el valor que las llena, al lado de la columna completa:
+            {% for col, check in floor_split_columns.items() %}<strong>{{ col }}</strong>
+            ({{ "%g" | format(check.floor) }} en el {{ "%.1f" | format(check.floor_pct) }}% de las filas){% if not loop.last %}, {% endif %}{% endfor %}.
+            Un valor repetido en el fondo de la columna aplasta el resto, y cuando ese valor es 0 la escala
+            logarítmica no puede arreglarlo: dejaría fuera la mayoría de las filas. Se hace cuando ese valor
+            ocupa al menos el {{ "%g" | format(floor_split_min_share) }}% de las filas, lo que queda tiene más
+            de {{ floor_split_min_distinct }} valores distintos y el gráfico completo está aplastado.
+        </p>
+        {% endif %}
         {% if log_scale_columns %}
         <p style="color: #555; margin-top: -8px;">
             Con escala logarítmica a la derecha de la lineal: <strong>{{ log_scale_columns | join(", ") }}</strong>.
@@ -683,6 +699,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if plots.boxplots %}
         <h3>Boxplots ({{ plots.boxplots | length }})</h3>
+        {% if floor_split_columns %}
+        <p style="color: #555; margin-top: -8px;">
+            Sin el valor que las llena, al lado de la columna completa:
+            <strong>{{ floor_split_columns | join(", ") }}</strong>.
+        </p>
+        {% endif %}
         {% if log_scale_columns %}
         <p style="color: #555; margin-top: -8px;">
             Con escala logarítmica a la derecha de la lineal: <strong>{{ log_scale_columns | join(", ") }}</strong>.
@@ -873,6 +895,7 @@ def generate_html_report(
     time_stats: Optional[dict] = None,
     pair_plot=None,
     log_scale_columns: Optional[list] = None,
+    floor_split_columns: Optional[dict] = None,
     recommendations: Optional[list] = None,
 ) -> str:
     """
@@ -887,6 +910,8 @@ def generate_html_report(
         time_stats: ``{column: TimeOfDayStats}`` for the time-of-day columns.
         pair_plot: The ``PairPlotSpec`` the pair plot was drawn from, described next to it.
         log_scale_columns: Columns drawn with a log scale next to the linear chart.
+        floor_split_columns: ``{column: FloorSplitCheck as a dict}`` for the columns drawn again
+            without the repeated lowest value that fills them.
         recommendations: The preprocessing plan (``Recommendation`` list), shown as the last section.
 
     Returns:
@@ -920,6 +945,7 @@ def generate_html_report(
         "time_stats": time_stats or {},
         "pair_plot": pair_plot,
         "log_scale_columns": log_scale_columns or [],
+        "floor_split_columns": floor_split_columns or {},
         "recommendations": recommendations or [],
         "recommendation_steps": recommendations_by_step(recommendations),
         "pair_plot_min_eta": PAIR_PLOT_MIN_HUE_ETA,
@@ -930,6 +956,8 @@ def generate_html_report(
         "target_analysis": target_analysis,
         "plots": encoded_plots,
         "pie_max_categories": PIE_MAX_CATEGORIES,
+        "floor_split_min_share": FLOOR_SPLIT_MIN_SHARE,
+        "floor_split_min_distinct": FLOOR_SPLIT_MIN_DISTINCT,
         "alerts": alerts,
         "ignored_columns": ignored_columns or [],
         "failed_steps": failed_steps or [],
