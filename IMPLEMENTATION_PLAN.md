@@ -506,3 +506,51 @@ Verified with real output:
 - Reviewing the rendered stroke plot showed the shared diagonal scale flattening the 5% of stroke cases; normalising each group on its own shows them concentrated at older ages and high glucose.
 - Reports regenerated on `main`, all without a failed step and with the block right after the scatter plots: `reports/penguins_batch_20260913_202350` (`penguins_lter` 6 columns and `penguins_size` 4, coloured by species), `reports/mx_batch_20260913_202434` (`cobranza` 3 columns, `siniestros` 5, `credito_asegurado` 6 sampled to 2 000 of 76 526 rows, all uncoloured; `clientes` has a single continuous column and no pair plot) and `reports/healthcare-dataset-stroke-data_20260913_202558` (with `--target stroke`, coloured by the target, 2 000 of 4 909 complete rows).
 - Known limit: heavily skewed money columns (`credito_asegurado`) crowd almost every point near zero, as in the scatter plots; a log scale is not part of this stage.
+
+## Stage 24: A log scale next to the linear chart, for skewed columns
+**Goal**: The user asked how one recognises that a skewed amount needs a log scale. A rule was measured and proposed; he approved it, asked for it in histograms and boxplots as well, and asked that the chart without the log always stay beside it so the two can be compared.
+
+**Success Criteria**:
+- A continuous numeric column is drawn on a log scale when three things hold at once: the middle 90% of its rows takes less than 30% of the axis, the log at least doubles that span, and at most 5% of its values are 0 or negative.
+- The log version never replaces the linear one: in histograms, boxplots and scatter plots it goes to the right of the linear chart in the same image; the pair plot is repeated below it with log10 in those columns.
+- Values at or below 0 cannot be drawn on a log axis: they are left out of the log panel and the title says how many.
+- The report states the rule and which columns meet it, and `summary.json → log_scale_columns` holds the measurement of each one.
+- `ruff check .` and `ruff format --check .` are clean, with no warnings.
+
+**Tests** (all failed before the code existed):
+- `tests/test_modules.py::TestLogScale`: 10 tests (skewed amounts need it; a symmetric measure does not; many values at or below zero rule it out while a few are allowed and counted; no gain from the log means no log; too few values; the linear chart stays beside the log one in histograms and boxplots; only continuous columns are checked).
+- `tests/test_integration.py::TestOutputCompleteness::test_skewed_amounts_get_a_log_scale_next_to_the_linear_charts`.
+
+**Status**: COMPLETE. PR #31 was merged on 2026-09-14 as `1ce6ab7`, and its branch was deleted.
+
+Verified with real output:
+- **252 tests passed** on the branch, 0 failed, no warnings, ruff clean (241 + 11 new). `main` after the merge: **252 passed**.
+- Three candidate rules were measured over the 56 distinct continuous columns of `data/raw` before any code was written. Skewness > 2 picks columns that already read well (`line_total`) and columns full of zeros (`waste_pct`, `prima_cedida`), where a log axis would hide most of the rows. A p99/p1 ratio of two orders of magnitude picks `marketing_spend` and `total_revenue`, where the log does not help. The rule above picks exactly 12 columns, all of them in the Mexican data: `credito_asegurado` (`numero_creditos`, `monto_enganche`, `monto_credito`, `prima_emitida`, `prima_devengada`, `saldo_principal`), `cobranza` (`numero_creditos`, `saldo_inicial_principal`), `clientes` (`numero_creditos`) and `siniestros` (`numero_creditos`, `monto_siniestro`, `valor_ultimo_avaluo`). No other dataset has a column that meets it, so no other report changed.
+- Reviewed by eye on the regenerated Mexican reports: the histogram of `monto_credito` goes from a single bar at 0 to a distribution peaking near 10⁶; the boxplot of `saldo_principal` goes from a flat line to a readable box (1 024 values at or below 0 left out); the log10 pair plot shows `prima_emitida` and `prima_devengada` falling on one straight line, which the linear one hid.
+- Regenerated on `main` after the merge, with no failed step: `reports/mx_batch_20260916_203749` still picks the same 6 columns in `credito_asegurado`, 2 in `cobranza`, 1 in `clientes` and 3 in `siniestros`, while `reports/penguins_batch_20260916_203959` picks none.
+- Technical note: the log pair plot uses transformed columns (`log10(col)`) instead of log axes, because seaborn computes the diagonal on a linear scale and log axes break it. The other three charts use log axes, so their ticks keep the real values.
+
+## Stage 25: The report closes with a preprocessing plan
+**Goal**: The user asked how feasible and how precise a final section of recommendations would be (which variables to impute and how, what to scale, which encoding to apply). It was measured before answering, and he asked for only the first block — what the data settles on its own — leaving the rest until this one is shown not to fail.
+
+**Success Criteria**:
+- The report ends with «Plan de Preprocesamiento»: the steps in the order they are applied (convertir, descartar, imputar, codificar, escalar), and next to every line the measurement that produced it.
+- The section states what it leaves out: whether a categorical column is ordinal and in what order its levels go, and whether the model needs scaling at all. For scaling it states the measured fact — these spreads are incomparable — and leaves the call to the reader.
+- The same plan is written to `summary.json → recommendations` and to `tables/recommendations.csv`.
+- Every threshold is fixed by measurement over the 24 datasets of `data/raw`, and commented where it is defined.
+- The target is neither encoded nor scaled, and its gaps drop rows instead of being filled. A dropped column receives no further recommendation.
+- `ruff check .` and `ruff format --check .` are clean, with no warnings.
+
+**Tests** (all failed before the module existed):
+- `tests/test_modules.py::TestPreprocessingRecommendations`: 29 tests, one per rule and per edge (numbers kept as text; an almost empty column; a single value; an identifier; repeated rows; a redundant pair; skewed and symmetric imputation; mode against an explicit «Desconocido»; a 0/1 column; one-hot; rare categories grouped first; too many categories; too few rows for one-hot; comparable spreads; a heavy tail; a column already on a log scale; a single numeric column judged on nothing; the target left out; rows without a target; the order of the steps; free text alone).
+- `tests/test_integration.py::TestOutputCompleteness::test_the_report_closes_with_a_preprocessing_plan` and `test_the_plan_keeps_the_target_out_of_the_feature_steps`; `test_csv_tables_are_written` now also expects `recommendations.csv`.
+
+**Status**: COMPLETE. PR #32 was merged on 2026-09-16 as `af1fa17`, and its branch was deleted.
+
+Verified with real output:
+- **282 tests passed** on the branch, 0 failed, no warning under `-W error::UserWarning`, ruff clean (252 + 30 new). `main` after the merge: **282 passed**.
+- What can and cannot be decided was measured over the 265 columns before writing any rule. Decidable: 41 columns with gaps (35 at or under 5%, one at 92%), 25 identifiers and 8 constant columns to drop, 12 categorical columns above 30 values where one-hot does not fit, and spreads that are incomparable (2 100 million to one in `cobranza`). Not decidable: ordinal against nominal — of the 89 categorical columns an automatic rule would label 8, and all 8 are binary flags, while the two genuinely ordinal ones (`amazon.rating`, `clientes.grado_estudios`) are only reachable by name and their order is nowhere in the data.
+- Each threshold came from the same measurement: 60% missing to drop a column (the columns with gaps stop at 12% and the next is 92.4%); 0.10 standard deviations between mean and median (the measured displacement runs from 0.03, where the choice is irrelevant, to 0.82); one-hot up to 15 categories with at least 20 rows per new column, three categories always fitting (`Products.color` is 14 over 40 rows, `Dates.month_name` 12 over 366); 1% for a rare category (18 of the 89 columns have one); 10x between the widest and narrowest spread (the datasets split at 5.8 against 40.8); 5% of IQR outliers for a RobustScaler; |r| ≥ 0.95 for a redundant pair (16 measured, up to r = 1.0000 between `AC_POWER` and `DC_POWER`).
+- The plan was generated for all 24 datasets and read against the raw CSVs before publishing. That changed five things: numbers kept as text (`amazon.rating`, 1 464 of them read as 28 categories) now get a **convertir** step of their own at the front instead of being offered an encoding, and those columns sit out the remaining steps; a gap of 0.097 no longer prints as «0.10, por debajo de 0.10» (`Culmen Length (mm)`); «1 categorías aparecen» agrees in number now; five categories over 40 rows say the table is small instead of asking to group rare categories the column does not have (`Products.product_category`); and an identifier says it was classified as one rather than quoting a cardinality that does not look like a key (`Sample Number`, 152 distinct values over 344 rows). The steps are not numbered either: without columns to convert, the plan would have started at «2».
+- Reports regenerated on `main` after the merge, all without a failed step, with the plan as the last section, its CSV written and the target left out of the feature steps: `reports/mx_batch_20260916_203749` (8 lines for `clientes`, 7 for `cobranza`, 19 for `credito_asegurado`, 14 for `siniestros`), `reports/penguins_batch_20260916_203959` (24 and 13) and `reports/healthcare-dataset-stroke-data_20260916_203825` (10, with `--target stroke`).
+- Known limit: redundant pairs are reported one pair at a time. In `siniestros` four pairs share columns, so following them one by one would drop more than necessary; the VIF in the relationships section is what covers a whole group.
