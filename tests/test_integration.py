@@ -784,6 +784,9 @@ class TestOutputCompleteness:
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
         assert "Target vs Variables Categóricas" in html
+        # A p-value below 0.0001 reaches the page as text: a bare < would open a tag.
+        assert "<0.0001" not in html
+        assert "&lt;0.0001" in html
         categorical_at = html.index("Distribuciones Categóricas")
         target_bars_at = html.index("Target vs Variables Categóricas")
         assert categorical_at < target_bars_at

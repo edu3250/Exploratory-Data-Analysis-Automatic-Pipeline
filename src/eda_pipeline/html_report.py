@@ -18,6 +18,38 @@ from .visualizations import PAIR_PLOT_MIN_HUE_ETA, PIE_MAX_CATEGORIES
 logger = logging.getLogger(__name__)
 
 
+def format_measure(value: object, decimals: int = 3) -> str:
+    """
+    A measured number for a report cell, or "N/A" when there is none.
+
+    A p-value or an effect size of exactly 0 is a result: the template used to test the value for
+    truth, so VIP's mutual information of 0.0 was shown as if it had not been measured.
+    """
+    if value is None:
+        return "N/A"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+    if number != number:  # NaN
+        return "N/A"
+    return f"{number:.{decimals}f}"
+
+
+def format_p_value(value: object) -> str:
+    """
+    A p-value for a report cell.
+
+    Anything under 0.0001 is shown as "<0.0001": rounding it to 0.0000 reads as certainty, and a
+    p-value that reaches exactly 0 only underflowed. The template escapes what this returns, since
+    it is rendered without autoescaping and a bare < opens a tag.
+    """
+    text = format_measure(value, 4)
+    if text == "N/A":
+        return text
+    return "<0.0001" if float(value) < 0.0001 else text
+
+
 def image_to_base64(image_path: Path) -> str:
     """Convert image file to base64 for embedding."""
     with open(image_path, "rb") as f:
@@ -500,7 +532,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     <td>{{ pair.var1 }}</td>
                     <td>{{ pair.var2 }}</td>
                     <td>{{ "%.3f" | format(pair.correlation) }}</td>
-                    <td>{{ "%.4f" | format(pair.p_value) if pair.p_value else 'N/A' }}</td>
+                    <td>{{ format_p_value(pair.p_value) | e }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -585,8 +617,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <tr>
                     <td>{{ rel.feature }}</td>
                     <td>{{ rel.test_name }}</td>
-                    <td>{{ "%.4f" | format(rel.p_value) if rel.p_value and rel.p_value == rel.p_value else 'N/A' }}</td>
-                    <td>{{ "%.3f" | format(rel.effect_size) if rel.effect_size and rel.effect_size == rel.effect_size else 'N/A' }}</td>
+                    <td>{{ format_p_value(rel.p_value) | e }}</td>
+                    <td>{{ format_measure(rel.effect_size, 3) }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -901,6 +933,8 @@ def generate_html_report(
         "alerts": alerts,
         "ignored_columns": ignored_columns or [],
         "failed_steps": failed_steps or [],
+        "format_measure": format_measure,
+        "format_p_value": format_p_value,
     }
 
     # Render template

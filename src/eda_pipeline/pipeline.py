@@ -407,6 +407,7 @@ class EDAPipeline:
                 target_column,
                 self.config.target.target_type,
                 imbalance_threshold=self.config.target.class_imbalance_threshold,
+                column_types=column_types,
                 default=None,
             )
 

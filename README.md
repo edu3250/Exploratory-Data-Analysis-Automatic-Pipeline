@@ -444,7 +444,15 @@ Para columnas target:
 - **Balance de clases**: se marca **desbalanceado** cuando la clase mayoritaria representa más de
   `class_imbalance_threshold` del total (por defecto 0.8, es decir, más del 80%) —
   independientemente de cuántas clases haya
-- **Feature Importance**: Pruebas estadísticas (chi-square, Kruskal-Wallis, mutual information)
+- **Features más relacionadas con el target**: la prueba depende del tipo de target, no de cómo esté
+  guardado. Con un target de clasificación, chi-cuadrado para las categóricas y Kruskal-Wallis para
+  las numéricas; con uno de regresión, información mutua. La columna «Efecto» es siempre una medida
+  de asociación de 0 a 1 —Cramér's V entre categóricas, razón de correlación (eta) entre una
+  categórica y una numérica—, las mismas del mapa de asociación, así que se pueden comparar entre
+  sí. La tabla se ordena por ese efecto: con miles de filas todos los p-value se van a 0 y dejan de
+  ordenar nada. Los identificadores, el texto libre, las fechas y las horas no entran: un
+  chi-cuadrado sobre miles de categorías mide unicidad, no relación (`PassengerId` encabezaba la
+  tabla del Spaceship Titanic con un efecto de 1.000).
 - **Leakage**: Correlaciones sospechosamente altas (>0.99) o asociaciones categóricas casi perfectas
 - **Columna inexistente**: en `analyze-file` el comando falla con un mensaje en español (columnas
   disponibles + sugerencia); en `analyze-batch` se registra una advertencia y el análisis de ese
