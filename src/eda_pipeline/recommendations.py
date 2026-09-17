@@ -71,9 +71,15 @@ RARE_CATEGORY_PCT = 1.0
 # to 2.1e9 in cobranza.
 SCALING_STD_RATIO = 10.0
 
-# Outlier share (IQR) above which the mean and the standard deviation are dragged by the tail, so the
-# median and the IQR centre the column better. 6 columns of credito_asegurado and 5 of siniestros.
-ROBUST_SCALER_OUTLIER_PCT = 5.0
+# How many times wider the standard deviation is than the interquartile range before the mean and the
+# standard deviation stop describing the column: past that, the median and the IQR centre it better.
+# A normal column sits near 0.74. Measured over the 111 numeric columns of data/raw the two groups do
+# not touch: the widest column below is avg_glucose_level at 1.23 and the narrowest above is
+# siniestros.valor_ultimo_avaluo at 3.60, so any cut inside that band picks the same 24 columns.
+# The share of IQR outliers cannot be used for this: it moves with the fence (see outlier_detection
+# .pinned_value) and, at 10%, it picked columns whose mean and standard deviation are perfectly fine
+# (Order_Details.unit_price, Returns.refund_amount, both at a ratio of 1.0).
+ROBUST_SCALER_SPREAD_RATIO = 2.0
 
 # Correlation above which two columns carry the same information. Measured: 16 pairs across the
 # datasets, up to r = 1.0000 between AC_POWER and DC_POWER in the solar data.
@@ -361,16 +367,15 @@ def encoding_recommendations(df, column_types, skip=(), target_column=None) -> l
     return recs
 
 
-def _outlier_pct(outliers, column: str, count: int) -> float:
-    """Share of a column's values that the IQR rule flagged, 0 when the rule did not apply."""
-    if outliers is None or count <= 0:
+def spread_ratio(stats) -> float:
+    """Standard deviation over interquartile range; infinite when half the column is one value."""
+    if stats is None or not np.isfinite(stats.std):
         return 0.0
-    info = (getattr(outliers, "iqr_outliers", {}) or {}).get(column)
-    return float(info.n_outliers) / count * 100 if info else 0.0
+    return float(stats.std) / float(stats.iqr) if stats.iqr > 0 else float("inf")
 
 
 def scaling_recommendations(
-    df, column_types, numeric_stats, outliers=None, log_scale_columns=(), skip=(), target_column=None
+    df, column_types, numeric_stats, log_scale_columns=(), skip=(), target_column=None
 ) -> list[Recommendation]:
     """Whether the numeric columns live on comparable scales, and which scaler suits each one."""
     skip = set(skip)
@@ -427,20 +432,27 @@ def scaling_recommendations(
     ]
 
     for column in usable:
-        count = int(numeric_stats[column].count)
-        outlier_pct = _outlier_pct(outliers, column, count)
+        stats = numeric_stats[column]
+        ratio = spread_ratio(stats)
         if column in log_columns:
             action = "Aplicar log10 y después StandardScaler"
             evidence = "Ya se dibuja en escala logarítmica: su cola se come el eje lineal"
-        elif outlier_pct > ROBUST_SCALER_OUTLIER_PCT:
+        elif not np.isfinite(ratio):
+            # RobustScaler divides by the interquartile range, and here there is none to divide by.
+            action = "StandardScaler (media y desviación)"
+            evidence = "Al menos la mitad de sus valores son iguales (IQR = 0): RobustScaler no tendría divisor"
+        elif ratio > ROBUST_SCALER_SPREAD_RATIO:
             action = "RobustScaler (mediana e IQR)"
             evidence = (
-                f"El {outlier_pct:.1f}% de sus valores son outliers por IQR: arrastran la media "
-                f"y la desviación que usaría StandardScaler"
+                f"Su desviación ({_number(stats.std)}) es {_number(ratio)} veces el rango intercuartil "
+                f"({_number(stats.iqr)}): la cola arrastra la media y la desviación que usaría StandardScaler"
             )
         else:
             action = "StandardScaler (media y desviación)"
-            evidence = f"Solo el {outlier_pct:.1f}% de outliers por IQR: media y desviación son estables"
+            evidence = (
+                f"Su desviación ({_number(stats.std)}) y su rango intercuartil ({_number(stats.iqr)}) "
+                f"concuerdan: la media y la desviación describen bien la columna"
+            )
         recs.append(Recommendation(step=STEP_SCALE, column=column, action=action, evidence=evidence))
 
     return recs
@@ -452,7 +464,6 @@ def build_recommendations(
     *,
     quality,
     numeric_stats,
-    outliers=None,
     correlation_matrix=None,
     log_scale_columns=(),
     target_column=None,
@@ -465,7 +476,6 @@ def build_recommendations(
         column_types: Inferred semantic type per column.
         quality: ``DataQualityReport`` (missing shares, duplicates, constant columns).
         numeric_stats: ``{column: NumericStats}`` from the univariate analysis.
-        outliers: ``OutlierReport``; its IQR share picks the scaler.
         correlation_matrix: Numeric correlation matrix, to find redundant pairs.
         log_scale_columns: Columns already drawn on a log scale (rule D).
         target_column: Excluded from encoding and scaling; its gaps drop rows instead of being filled.
@@ -487,9 +497,7 @@ def build_recommendations(
     plan = conversions + drops + redundancy_recommendations(correlation_matrix, skip=pending)
     plan += imputation_recommendations(df, column_types, numeric_stats, quality, pending, target_column)
     plan += encoding_recommendations(df, column_types, pending, target_column)
-    plan += scaling_recommendations(
-        df, column_types, numeric_stats, outliers, log_scale_columns, pending, target_column
-    )
+    plan += scaling_recommendations(df, column_types, numeric_stats, log_scale_columns, pending, target_column)
 
     logger.info(f"Plan de preprocesamiento: {len(plan)} recomendación(es)")
     return plan

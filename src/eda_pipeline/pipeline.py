@@ -444,7 +444,6 @@ class EDAPipeline:
                 column_types,
                 quality=dq_report,
                 numeric_stats=univariate_report.numeric_stats,
-                outliers=outliers_report,
                 correlation_matrix=relationships_report.correlation_matrix,
                 log_scale_columns=log_scale,
                 target_column=target_column,
