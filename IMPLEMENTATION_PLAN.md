@@ -607,3 +607,50 @@ Verified with real output:
 - The three conditions pick 8 columns across the 24 datasets: the five spending columns of spaceship (62-66% zeros), `credito_asegurado.prima_cedida` (83.8%), `siniestros.monto_recuperado_reaseguro` (66.8%) and `Inventory.waste_pct` (90.2%). No other chart changes, and no column gets both a log panel and a split.
 - Reports regenerated on `main` after the merge, all without a failed step: `reports/spaceship_titanic_20260917_112601` (the five spending columns split and only those), `reports/mx_batch_20260917_112638` (`prima_cedida` in `credito_asegurado`, `monto_recuperado_reaseguro` in `siniestros`) and `reports/healthcare-dataset-stroke-data_20260917_112850` (none: no column of its own is filled by its lowest value) and `reports/Vistara_batch_20260917_113241` (`waste_pct` in `Inventory`, while `discount_pct` stays whole, as the rule intends).
 - Drawing the alternatives before choosing decided two things that the numbers alone did not. A three-panel version (whole, log of everything, the rest) is redundant on `numero_creditos`, where the log panel and the rest panel look almost the same, which is why a column with a log panel is left alone. And a rule keyed only on the share of zeros would have split `discount_pct` into a four-bar chart and the solar columns, which already read well.
+
+## Stage 28: The project speaks English
+**Goal**: Everything the pipeline showed was written in Spanish: the report's ten sections and their explanations, every word drawn inside a chart, the CSV headers, and the CLI's help, console output and logs. The user asked to migrate the project to English, README first, and to do it without moving a single measurement.
+
+**Success Criteria**:
+- The README is English, built around the report the pipeline produces, with a screenshot of a real one, and cut to the sections a reader actually needs.
+- Every word the report shows is English: sections, table headers, alerts and their recommendations, inferred type labels, the text drawn into the PNGs, the notes the outlier methods leave, and the preprocessing plan.
+- The step names travel with the plan, so `summary.json` and `recommendations.csv` read `convert / drop / impute / encode / scale`.
+- The CLI's `--help`, its console summary, its `ConfigError` messages and its log lines are English.
+- No threshold, rule or measurement changes: the same report, in another language.
+- `ruff check .` clean, with no warning under `-W error::UserWarning`.
+
+**Tests** (the assertions that read the product's own words were pointed at English and seen failing first):
+- 61 assertion lines across `tests/test_integration.py`, `tests/test_modules.py` and `tests/test_cli.py` for the report's wording, and 2 more for the CLI's console output. They assert the same facts as before, in the new wording; no test was added or dropped to make the translation pass, and the only one renamed was `test_unknown_target_exits_nonzero_with_spanish_message`, whose name had stopped being true.
+- `tests/test_cli.py::TestHelpExamples`: 7 new tests for the `--help` formatting fix.
+
+**Status**: COMPLETE. PRs #39 (`ec0562f`), #40 (`87c8d60`), #41 (`fa6c74a`) and #42 (`ece6d72`) were merged on 2026-09-17, and their branches were deleted.
+
+Verified with real output:
+- **315 tests passed** once the report was translated and **322** once the CLI was (315 plus the 7 new), 0 failed, no warning under `-W error::UserWarning`, ruff clean. `main` after the four merges: **322 passed**.
+- **The report did not change, only its language.** Regenerating `spaceship_titanic_train.csv --target Transported` after the CLI translation gave an HTML file identical to the pre-translation one on all 1 319 lines except its correlation id, and a `summary.json` identical once paths and timestamps are dropped. Regenerated again on `main` after the merges: no failed step, the same 2 alerts, the same 1 274 rows flagged by IQR, the same 22 lines of plan over the four English step names, the same 5 columns split at their floor, and `<html lang="en">`.
+- The whole regenerated report was read top to bottom and its text scanned for 48 Spanish words: none left. The PNGs were checked by eye, because their text is drawn into the image and no scan reaches it.
+- **What a grep missed and the tests caught**: `<html lang="es">`; `rows_per_period` still returning «día» / «semana» / «mes» into chart titles; the dtype label «texto»; and later two log lines the report translation never touched, the datetime-coercion warning and the `column_types` warning.
+- **One assertion was passing against the wrong thing.** `test_success_exits_zero` asserted `"Reporte HTML"`; pointed at `"HTML report"` it kept passing, because the log line `HTML report saved:` carries that text too, so it no longer bound the CLI's own output at all. It now asserts the summary line with its indent, `"   HTML report:"`, which does fail before the change.
+- The README went from 773 lines to 141, around a single example and a composite screenshot of a real report (`docs/report-preview.png`); its usage section was then cut to the three commands, with the prose that re-explained `analyze-batch` and `init-config` folded into the command block.
+- `--help` had been printing its examples as one run-on paragraph, because Click reflows every docstring paragraph to the terminal width. A `\b` marker on the three command docstrings leaves one example per line while the prose above them still reflows. The first patch wrote that marker as raw `0x08` bytes rather than the two-character escape: the tests passed and the help rendered correctly, since Click sees the same character either way, and it was reading the diff that caught invisible control characters sitting in the source.
+- Known limit: the migration covered the product. The conversation, the working notes and the Obsidian vault stay in Spanish on purpose.
+
+## Stage 29: The MIT license the project already claimed
+**Goal**: The README badge said MIT and `pyproject.toml` said MIT, but no `LICENSE` file existed, so `gh repo view --json licenseInfo` returned `null` and the repository showed no license at all. Without that file the default applies, all rights reserved, which is the opposite of what the badge promised.
+
+**Success Criteria**:
+- A `LICENSE` file GitHub detects as MIT, carrying the real copyright holder.
+- The placeholder authorship in `pyproject.toml` (`Data Science Team`, `dataops@example.com`) replaced with the real author.
+- The README's License section points at the file instead of only naming it.
+
+**Tests**: none. No code changed; what stands in for tests here is what the packaging metadata and GitHub itself report back.
+
+**Status**: COMPLETE. PR #43 was merged on 2026-09-17 as `7dfec9c`, and its branch was deleted.
+
+Verified with real output:
+- The file is GitHub's own MIT template with the year and holder filled in. Normalising whitespace it is character-for-character identical to `gh api licenses/mit` (1 066 characters both ways), which is the text their detector matches; anything else would have shown as "Other".
+- After the merge, `gh repo view --json licenseInfo` returns `{"key": "mit", "name": "MIT License"}` where it returned `null` before.
+- After an editable reinstall the package metadata reads back `Author-email: Eduardo Arenas <...>` and `License: MIT`, and setuptools 84 accepts the file unchanged.
+- **322 tests passed** on `main` after the merge, ruff clean.
+- Left alone on purpose: `license = { text = "MIT" }`. The SPDX form that setuptools 77+ prefers would mean raising the build requirement from `setuptools>=65`, which is a packaging decision of its own.
+- Deferred on purpose: the GitHub Actions workflow. While the repository is private its badge does not render for anonymous visitors, so it buys nothing a reader can see; it is parked until the repository goes public. It would also settle `requires-python = ">=3.10"`, which has never been exercised: the project has only ever run on 3.11.9 with pandas 3.0.5, and the hard-coded badges go stale on the first merge that adds a test. This stage had to correct them by hand: `tests 315 passing` to 322 in three places, and «38 merged PRs» to 43. The coverage claim was re-measured rather than assumed, and it still holds: 92% exactly, 2 655 statements with 217 missed. The «50 defects» figure was left alone, because it is the vault's count through stage 26 and nothing since has been counted rigorously.
