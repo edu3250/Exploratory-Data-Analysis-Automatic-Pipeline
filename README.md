@@ -5,7 +5,7 @@ outliers, relationships, target analysis, 40+ charts, and a preprocessing plan w
 recommendation carries the measurement that produced it.
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![tests 315](https://img.shields.io/badge/tests-315%20passing-brightgreen)
+![tests 322](https://img.shields.io/badge/tests-322%20passing-brightgreen)
 ![coverage 92%](https://img.shields.io/badge/coverage-92%25-brightgreen)
 ![ruff](https://img.shields.io/badge/lint-ruff%20clean-purple)
 ![license MIT](https://img.shields.io/badge/license-MIT-lightgrey)
@@ -102,9 +102,9 @@ a human reviews and merges it:
 - **Measure first.** No rule ships before it is run over the 24 real datasets and the output read
   against the raw CSVs. Reading that output is what catches the mistakes: it is how the preprocessing
   plan stopped offering to one-hot-encode a rating that was really 1 464 numbers stored as text.
-- **Tests before code.** Every rule has tests that were seen failing first — 315 of them, 0 failures,
+- **Tests before code.** Every rule has tests that were seen failing first — 322 of them, 0 failures,
   no warnings, 92% coverage, `ruff` clean.
-- **One change per pull request.** 38 merged PRs, each with what was measured, what it picks and
+- **One change per pull request.** 43 merged PRs, each with what was measured, what it picks and
   what it deliberately leaves out.
 - **Independent verification.** 50 defects have been found and fixed this way, including in work the
   AI itself produced: an agent once reported "ruff 100% clean" when it was not, and reading a
@@ -120,7 +120,7 @@ report matched the raw file; it took reading the report line by line against the
 ```
 src/eda_pipeline/       loading · type inference · data quality · univariate · outliers ·
                         relationships · target · recommendations · charts · HTML report
-tests/                  315 tests, unit and integration, 92% coverage
+tests/                  322 tests, unit and integration, 92% coverage
 config/default.yaml     every threshold, overridable per run
 data/raw/               the datasets the rules were measured on (not tracked)
 IMPLEMENTATION_PLAN.md  27 stages, each with its measurements and what was verified
