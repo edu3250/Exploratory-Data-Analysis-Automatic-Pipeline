@@ -1118,5 +1118,37 @@ class TestVerboseLogging:
         assert pipeline.logger.level == 20  # logging.INFO
 
 
+class TestDatasetNamingEndToEnd:
+    """A Kaggle folder of train/test files must produce reports that say which dataset they are."""
+
+    def _frame(self):
+        return pd.DataFrame({"age": [20, 30, 40, 50] * 5, "sex": ["m", "f"] * 10, "survived": [0, 1] * 10})
+
+    def test_a_single_split_file_is_named_after_its_folder(self, tmp_output_dir):
+        folder = tmp_output_dir / "Kaggle Titanic"
+        folder.mkdir()
+        self._frame().to_csv(folder / "train.csv", index=False)
+
+        results = _make_pipeline(
+            input_file=str(folder / "train.csv"), output_dir=str(tmp_output_dir / "out")
+        ).run()
+
+        assert list(results) == ["Kaggle_Titanic_train"]
+        output_dir = Path(results["Kaggle_Titanic_train"]["output_dir"])
+        assert output_dir.name.startswith("Kaggle_Titanic_train_")
+        summary = json.loads(Path(results["Kaggle_Titanic_train"]["summary_json"]).read_text(encoding="utf-8"))
+        assert summary["dataset_name"] == "Kaggle_Titanic_train"
+
+    def test_a_batch_qualifies_only_the_split_files(self, tmp_output_dir):
+        folder = tmp_output_dir / "Kaggle Titanic"
+        folder.mkdir()
+        for name in ("train.csv", "test.csv", "passengers.csv"):
+            self._frame().to_csv(folder / name, index=False)
+
+        results = _make_pipeline(input_folder=str(folder), output_dir=str(tmp_output_dir / "out")).run()
+
+        assert set(results) == {"Kaggle_Titanic_train", "Kaggle_Titanic_test", "passengers"}
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

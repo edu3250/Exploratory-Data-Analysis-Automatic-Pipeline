@@ -36,6 +36,7 @@ from eda_pipeline.outlier_detection import (
     detect_outliers_mad,
     isolation_forest_cutoff,
 )
+from eda_pipeline.pipeline import dataset_name_for
 from eda_pipeline.relationships import association_matrix, correlation_ratio, cramers_v, pearson_correlation
 from eda_pipeline.target_analysis import analyze_class_balance
 from eda_pipeline.type_inference import (
@@ -2140,6 +2141,42 @@ class TestPreprocessingRecommendations:
     def test_free_text_alone_produces_no_plan(self):
         df = pd.DataFrame({"comentario": [f"el cliente {i} dejo una nota larga sobre el servicio" for i in range(60)]})
         assert self._plan(df) == []
+
+
+class TestDatasetNaming:
+    """
+    What a report is called when the file name only says which split it is.
+
+    Kaggle ships train.csv / test.csv / sample_submission.csv inside a folder whose name is the
+    only thing that says what the data is, so a report called «train» loses it.
+    """
+
+    def test_a_descriptive_stem_names_itself(self):
+        assert dataset_name_for(Path("data/raw/mx/clientes.csv")) == "clientes"
+        assert dataset_name_for(Path("data/raw/penguins/penguins_size.csv")) == "penguins_size"
+
+    def test_a_split_stem_takes_the_folder_that_identifies_it(self):
+        assert dataset_name_for(Path("data/raw/Kaggle Titanic/train.csv")) == "Kaggle_Titanic_train"
+        assert dataset_name_for(Path("data/raw/Kaggle Titanic/test.csv")) == "Kaggle_Titanic_test"
+
+    def test_the_folder_name_is_slugified(self):
+        """Spaces and punctuation must not leak into a folder name, as _batch_run_folder_name does."""
+        assert dataset_name_for(Path("d/house prices (2024)/train.csv")) == "house_prices_2024_train"
+
+    def test_the_match_ignores_case(self):
+        assert dataset_name_for(Path("d/titanic/TRAIN.CSV")) == "titanic_TRAIN"
+
+    def test_a_folder_that_says_where_not_what_does_not_qualify(self):
+        """«raw_train» is no better than «train», so container folders stay out of the name."""
+        assert dataset_name_for(Path("data/raw/train.csv")) == "train"
+        assert dataset_name_for(Path("C:/downloads/test.parquet")) == "test"
+
+    def test_a_folder_named_like_the_split_is_not_doubled(self):
+        assert dataset_name_for(Path("d/train/train.csv")) == "train"
+
+    def test_the_submission_files_kaggle_ships_are_split_names_too(self):
+        assert dataset_name_for(Path("d/titanic/gender_submission.csv")) == "titanic_gender_submission"
+        assert dataset_name_for(Path("d/titanic/sample_submission.csv")) == "titanic_sample_submission"
 
 
 if __name__ == "__main__":
