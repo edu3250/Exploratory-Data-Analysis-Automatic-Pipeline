@@ -39,6 +39,84 @@ from .visualizations import (
     log_scale_columns,
 )
 
+# Stems that name a split of a dataset rather than the dataset itself. Kaggle ships train.csv,
+# test.csv and sample_submission.csv inside a folder whose name is the only thing that says what
+# the data is, so a report called "train" says nothing about which competition it came from.
+# Measured over the 31 data files under data/raw: the only stems that identify nothing are the
+# three in "Kaggle Titanic" (train, test, gender_submission); every other file already names its
+# own dataset (clientes, penguins_size, Plant_1_Generation_Data, Sales_Receipts...).
+# "data" is deliberately absent: it is a neutral filename rather than a split, and qualifying it
+# would rename datasets whose names are already fine.
+SPLIT_STEMS = frozenset(
+    {
+        "train",
+        "test",
+        "val",
+        "valid",
+        "validation",
+        "dev",
+        "holdout",
+        "submission",
+        "sample_submission",
+        "gender_submission",
+    }
+)
+
+# Folders that say where a file lives, not what it holds. Qualifying train.csv with one of these
+# would give "raw_train", which is no better than "train", so the plain stem is kept instead.
+CONTAINER_FOLDERS = frozenset(
+    {
+        "data",
+        "raw",
+        "dataset",
+        "datasets",
+        "input",
+        "inputs",
+        "files",
+        "csv",
+        "tmp",
+        "temp",
+        "downloads",
+    }
+)
+
+
+def _slug(name: str) -> str:
+    """
+    A folder or file name as a path-safe piece of another name ("power Bi" -> "power_Bi").
+
+    Runs of replaced characters collapse into one underscore, so "house prices (2024)" reads as
+    "house_prices_2024" rather than "house_prices__2024_".
+    """
+    cleaned = "".join(char if (char.isalnum() or char in "-._") else "_" for char in name)
+    return "_".join(part for part in cleaned.split("_") if part).strip("._")
+
+
+def dataset_name_for(file_path: Path) -> str:
+    """
+    What one dataset's report is called: the file's stem, qualified by its folder when the stem
+    only names a split.
+
+    ``data/raw/Kaggle Titanic/train.csv`` becomes ``Kaggle_Titanic_train``, while
+    ``data/raw/mx/clientes.csv`` stays ``clientes``: a stem that already names its dataset is
+    never touched. The folder is left out when it only says where the file lives (``data/raw``),
+    or when it repeats the stem.
+    """
+    stem = file_path.stem
+    if stem.lower() not in SPLIT_STEMS:
+        return stem
+
+    try:
+        parent = file_path.resolve().parent.name
+    except OSError:  # an unresolvable path (a dead network drive, a name Windows rejects)
+        parent = file_path.parent.name
+
+    if parent.lower() in CONTAINER_FOLDERS or parent.lower() == stem.lower():
+        return stem
+
+    slug = _slug(parent)
+    return f"{slug}_{stem}" if slug else stem
+
 
 class TargetColumnNotFoundError(ValueError):
     """Raised when the configured target column is missing (single-file mode fails fast on this)."""
@@ -167,7 +245,7 @@ class EDAPipeline:
             try:
                 if self.config.input_file:
                     file_path = Path(self.config.input_file)
-                    dataset_name = file_path.stem
+                    dataset_name = dataset_name_for(file_path)
                     self.logger.info(f"Loading data from: {file_path}")
                     all_results = {dataset_name: self._load_and_analyze(file_path, dataset_name)}
                 else:
@@ -208,10 +286,10 @@ class EDAPipeline:
         self.batch_output_dir = Path(self.config.output_dir) / self._batch_run_folder_name(folder_path, _timestamp())
         self.logger.info(f"This batch will write its reports to: {self.batch_output_dir}")
 
-        stem_counts = Counter(f.stem for f in files)
+        name_counts = Counter(dataset_name_for(f) for f in files)
         all_results = {}
         for file_path in files:
-            dataset_name = self._unique_dataset_name(file_path, stem_counts)
+            dataset_name = self._unique_dataset_name(file_path, name_counts)
             all_results[dataset_name] = self._load_and_analyze(file_path, dataset_name, self.batch_output_dir)
 
         return all_results
@@ -224,8 +302,7 @@ class EDAPipeline:
         The input folder's name is slugified, so spaces and other characters that are awkward in a
         path never leak into it ("power Bi" -> "power_Bi").
         """
-        raw = folder_path.resolve().name
-        slug = "".join(char if (char.isalnum() or char in "-._") else "_" for char in raw).strip("._")
+        slug = _slug(folder_path.resolve().name)
         return f"{slug or 'data'}_batch_{timestamp}"
 
     def _dataset_output_dir(self, dataset_name: str, batch_dir: Path | None) -> Path:
@@ -240,12 +317,12 @@ class EDAPipeline:
         return Path(self.config.output_dir) / f"{dataset_name}_{_timestamp()}"
 
     @staticmethod
-    def _unique_dataset_name(file_path: Path, stem_counts: Counter) -> str:
-        """Disambiguate same-stem files (e.g. sales.csv / sales.parquet) with a suffix hint."""
-        stem = file_path.stem
-        if stem_counts[stem] > 1:
-            return f"{stem}_{file_path.suffix.lstrip('.').lower()}"
-        return stem
+    def _unique_dataset_name(file_path: Path, name_counts: Counter) -> str:
+        """Disambiguate same-name files (e.g. sales.csv / sales.parquet) with a suffix hint."""
+        name = dataset_name_for(file_path)
+        if name_counts[name] > 1:
+            return f"{name}_{file_path.suffix.lstrip('.').lower()}"
+        return name
 
     def _load_and_analyze(self, file_path: Path, dataset_name: str, batch_dir: Path | None = None) -> dict:
         """
