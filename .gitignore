@@ -26,6 +26,8 @@ env/
 venv/
 ENV/
 
+
+notebooks/
 # IDEs
 .vscode/
 .idea/
