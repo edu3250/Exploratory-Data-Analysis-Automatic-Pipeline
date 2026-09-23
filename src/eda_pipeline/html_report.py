@@ -5,6 +5,7 @@ HTML report generation: self-contained, offline-ready report.
 import base64
 import json
 import logging
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -12,6 +13,7 @@ from typing import Optional
 import pandas as pd
 from jinja2 import Template
 
+from .multicollinearity import CHANCE_R_SQUARED_WARNING, HIGH_VIF, SHOWN_VIF
 from .recommendations import recommendations_by_step
 from .type_inference import dtype_label, semantic_type_label
 from .visualizations import (
@@ -54,6 +56,15 @@ def format_p_value(value: object) -> str:
     if text == "N/A":
         return text
     return "<0.0001" if float(value) < 0.0001 else text
+
+
+def format_vif(value: float) -> str:
+    """A VIF for a report cell: ∞ for an exact combination, and no exponent however large it gets."""
+    if math.isinf(value):
+        return "∞"
+    if value >= 1000:
+        return f"{value:,.0f}"
+    return f"{value:.1f}" if value >= 10 else f"{value:.2f}"
 
 
 def python_list_snippet(variable: str, columns) -> str:
@@ -293,6 +304,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             color: #999;
             font-style: italic;
         }
+        h4 {
+            color: #555;
+            margin: 16px 0 8px;
+        }
+        .mc-list {
+            padding-left: 24px;
+        }
+        .mc-list li {
+            margin-bottom: 4px;
+        }
         .heading-row {
             display: flex;
             flex-wrap: wrap;
@@ -371,6 +392,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             {% if outliers %}<li><a href="#outliers">Outliers</a></li>{% endif %}
             {% if target_analysis %}<li><a href="#target">Target</a></li>{% endif %}
             <li><a href="#visualizaciones">Charts</a></li>
+            {% if multicollinearity %}<li><a href="#multicolinealidad">Multicollinearity</a></li>{% endif %}
             {% if recommendation_steps %}<li><a href="#preprocesamiento">Preprocessing Plan</a></li>{% endif %}
         </ul>
     </div>
@@ -735,6 +757,82 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
         {% endif %}
 
+        {% if multicollinearity %}
+        {% set mc = multicollinearity %}
+        <h3 id="multicolinealidad">Multicollinearity</h3>
+        <p>How much of each numeric column the other numeric columns already explain. The VIF of a
+           column is 1 / (1 − R²), with R² from regressing it on all the others: 1 means it is
+           independent of them, {{ "%g" | format(high_vif) }} or more that they explain 90% of it, and ∞ that it is an
+           exact combination of them. 0/1 columns such as one-hot dummies count as numbers here, as they
+           do for a model. The matrices above compare columns two at a time; a total and its parts can
+           be an exact combination while no pair of them looks alike.</p>
+        {% if mc.note %}
+        <p class="no-data">{{ mc.note | e }}</p>
+        {% else %}
+        <p>Computed over the {{ mc.rows_used }} rows that have a value in all {{ mc.columns | length }} columns{% if mc.rows_used < mc.rows_total %}
+           ({{ mc.rows_total - mc.rows_used }} rows with a gap in any of them are left out){% endif %}{% if mc.target_left_out %};
+           the target, {{ mc.target_left_out | e }}, is not one of them{% endif %}.</p>
+        {% if mc.chance_r_squared > chance_warning %}
+        <p>With {{ mc.rows_used }} rows for {{ mc.columns | length }} columns, a column would reach an R² of
+           about {{ "%.2f" | format(mc.chance_r_squared) }} against the others by chance alone, so part of every VIF below is chance.</p>
+        {% endif %}
+
+        {% if mc.exact_dependencies %}
+        <h4>Exact combinations ({{ mc.exact_dependencies | length }})</h4>
+        <ul class="mc-list">
+            {% for dependency in mc.exact_dependencies %}
+            <li><code>{{ dependency.equation() | e }}</code> holds on
+                {% if dependency.rows == dependency.rows_checked %}all {{ dependency.rows }}{% else %}{{ dependency.rows }} of the {{ dependency.rows_checked }}{% endif %}
+                rows that have these columns. Dropping any one of these {{ dependency.columns | length }} columns breaks it.</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% set ranked = mc.ranked(include_exact=False) %}
+        {% set exact_count = mc.exact_columns | length %}
+        {% if exact_count %}
+        <p>The {{ exact_count }} columns of those combinations have an infinite VIF: each one is fully explained by the others.</p>
+        {% endif %}
+        {% if ranked %}
+        <h4>Highest VIF{% if exact_count %} outside the exact combinations{% endif %}</h4>
+        <table>
+            <thead>
+                <tr><th>Column</th><th>VIF</th><th>Explained mostly by</th></tr>
+            </thead>
+            <tbody>
+                {% for name, value in ranked %}
+                <tr>
+                    <td>{{ name | e }}</td>
+                    <td>{{ format_vif(value) }}</td>
+                    <td>{{ mc.partners.get(name, []) | join(", ") | e }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% set rest = (mc.columns | length) - exact_count - (ranked | length) %}
+        {% if rest %}
+        <p>The other {{ rest }} columns have a VIF under {{ "%g" | format(shown_vif) }}.</p>
+        {% endif %}
+        {% else %}
+        <p class="no-data">{% if exact_count %}Outside those combinations, no{% else %}No{% endif %} column has a VIF of {{ "%g" | format(shown_vif) }} or more: none of them is largely explained by the others.</p>
+        {% endif %}
+
+        {% if mc.suggested_drops %}
+        <h4>Columns to consider dropping ({{ mc.suggested_drops | length }})</h4>
+        <p>Dropping these, in this order, leaves every remaining VIF under {{ "%g" | format(high_vif) }}: first one column
+           per exact combination, then the column with the highest VIF, measured again after each drop.
+           Which column of a related group to keep is a modelling choice the data cannot make, so each
+           line names the columns that could go instead.</p>
+        <ol class="mc-list">
+            {% for drop in mc.suggested_drops %}
+            <li><code>{{ drop.column | e }}</code>:
+                {% if drop.exact %}an exact combination of {{ drop.partners | join(", ") | e }}{% else %}VIF {{ format_vif(drop.vif) }}, explained mostly by {{ drop.partners | join(", ") | e }}{% endif %}</li>
+            {% endfor %}
+        </ol>
+        {% endif %}
+        {% endif %}
+        {% endif %}
+
         {% if plots.missing %}
         <h3>Missing Values</h3>
         <div class="plot-container">
@@ -1030,6 +1128,7 @@ def generate_html_report(
     log_scale_columns: Optional[list] = None,
     floor_split_columns: Optional[dict] = None,
     recommendations: Optional[list] = None,
+    multicollinearity=None,
 ) -> str:
     """
     Generate HTML report with embedded base64 images.
@@ -1075,6 +1174,11 @@ def generate_html_report(
         "quasi_constant_columns": data_quality.get("quasi_constant_columns", {}),
         "numeric_stats": numeric_stats,
         "categorical_stats": categorical_stats,
+        "multicollinearity": multicollinearity,
+        "format_vif": format_vif,
+        "high_vif": HIGH_VIF,
+        "shown_vif": SHOWN_VIF,
+        "chance_warning": CHANCE_R_SQUARED_WARNING,
         "numeric_list": python_list_snippet("num", numeric_stats),
         "categorical_list": python_list_snippet("cat", categorical_stats),
         "time_stats": time_stats or {},

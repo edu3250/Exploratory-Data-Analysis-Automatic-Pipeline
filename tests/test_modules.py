@@ -35,6 +35,7 @@ from eda_pipeline.html_report import (
     preview_rows,
     python_list_snippet,
 )
+from eda_pipeline.multicollinearity import HIGH_VIF, analyze_multicollinearity
 from eda_pipeline.outlier_detection import (
     ISOLATION_FOREST_MIN_ROWS,
     detect_outliers_iqr,
@@ -2204,6 +2205,166 @@ class TestColumnListSnippet:
 
     def test_no_columns_is_an_empty_list(self):
         assert python_list_snippet("num", []) == "num = []"
+
+
+class TestMulticollinearity:
+    """
+    Which columns the others already explain, on any dataset: exact combinations (a total and its
+    parts, the one-hot dummy trap, a rescaled copy) and high VIF.
+    """
+
+    @staticmethod
+    def _analyze(df, target_column=None):
+        return analyze_multicollinearity(df, infer_all_types(df), target_column=target_column)
+
+    def test_independent_columns_are_not_flagged(self):
+        rng = np.random.default_rng(0)
+        df = pd.DataFrame({"a": rng.normal(size=400), "b": rng.normal(size=400), "c": rng.normal(size=400)})
+
+        report = self._analyze(df)
+
+        assert report.columns == ["a", "b", "c"]
+        assert all(1.0 <= value < 1.1 for value in report.vif.values())
+        assert report.exact_dependencies == [] and report.suggested_drops == []
+
+    def test_a_total_and_its_parts_are_an_exact_identity(self):
+        rng = np.random.default_rng(1)
+        a, b, c = (rng.normal(50, 10, 400).round(2) for _ in range(3))
+        df = pd.DataFrame({"a": a, "b": b, "c": c, "total": a + b + c})
+
+        report = self._analyze(df)
+
+        [dependency] = report.exact_dependencies
+        assert dependency.equation() == "total = a + b + c"
+        assert dependency.rows == 400
+        assert all(report.vif[col] == float("inf") for col in ("a", "b", "c", "total"))
+        assert [drop.column for drop in report.suggested_drops] == ["total"]
+        # The exact columns are told apart, so a ranking of high VIF does not repeat them.
+        assert report.exact_columns == ["a", "b", "c", "total"]
+        assert report.ranked(include_exact=False) == []
+
+    @pytest.mark.parametrize("dtype", [int, bool])
+    def test_a_full_one_hot_encoding_is_the_dummy_trap(self, dtype):
+        """0/1 columns are typed boolean, yet a model reads them as numbers: the trap must be seen."""
+        rng = np.random.default_rng(2)
+        color = rng.choice(["red", "green", "blue"], 400)
+        dummies = pd.get_dummies(color, prefix="color", dtype=dtype)
+        df = pd.concat([pd.DataFrame({"x": rng.normal(size=400)}), dummies], axis=1)
+
+        report = self._analyze(df)
+
+        [dependency] = report.exact_dependencies
+        assert set(dependency.columns) == {"color_blue", "color_green", "color_red"}
+        assert dependency.intercept == pytest.approx(1.0)
+        assert report.vif["x"] < 1.1  # the column outside the trap is untouched
+
+    def test_a_rescaled_copy_is_written_with_its_factor_and_offset(self):
+        rng = np.random.default_rng(3)
+        celsius = rng.normal(20, 8, 400).round(1)
+        df = pd.DataFrame({"celsius": celsius, "fahrenheit": celsius * 1.8 + 32, "humidity": rng.normal(60, 10, 400)})
+
+        [dependency] = self._analyze(df).exact_dependencies
+
+        assert dependency.equation() == "fahrenheit = 1.8*celsius + 32"
+
+    def test_separate_identities_are_reported_one_by_one(self):
+        rng = np.random.default_rng(4)
+        a, b, c, d, e = (rng.normal(100, 20, 400).round(1) for _ in range(5))
+        df = pd.DataFrame({"a": a, "b": b, "sum_ab": a + b, "c": c, "d": d, "e": e, "sum_cde": c + d + e})
+
+        report = self._analyze(df)
+
+        assert sorted(dep.equation() for dep in report.exact_dependencies) == [
+            "sum_ab = a + b",
+            "sum_cde = c + d + e",
+        ]
+        assert {drop.column for drop in report.suggested_drops} == {"sum_ab", "sum_cde"}
+
+    def test_an_exact_copy_does_not_blank_the_other_columns(self):
+        """Inverting a singular matrix used to fail, and the VIF of every column vanished with it."""
+        rng = np.random.default_rng(5)
+        a = rng.normal(size=400)
+        df = pd.DataFrame({"a": a, "b": rng.normal(size=400), "c": rng.normal(size=400), "a_copy": a})
+
+        report = self._analyze(df)
+
+        assert set(report.vif) == {"a", "b", "c", "a_copy"}
+        assert report.vif["b"] < 1.1 and report.vif["c"] < 1.1
+        [dependency] = report.exact_dependencies
+        assert dependency.column == "a_copy"  # on a tie, the column added later is the one written out
+        assert set(dependency.columns) == {"a", "a_copy"}
+
+    def test_high_vif_is_dropped_until_every_vif_is_under_ten(self):
+        rng = np.random.default_rng(6)
+        a, b = rng.normal(size=400), rng.normal(size=400)
+        df = pd.DataFrame(
+            {"a": a, "b": b, "near": a + b + rng.normal(scale=0.05, size=400), "z": rng.normal(size=400)}
+        )
+
+        report = self._analyze(df)
+
+        assert report.exact_dependencies == []
+        [drop] = report.suggested_drops
+        assert drop.column == "near" and drop.vif >= HIGH_VIF
+        assert set(drop.partners) == {"a", "b"}
+        assert report.vif["z"] < 1.1
+
+    def test_the_target_is_not_one_of_the_columns(self):
+        rng = np.random.default_rng(7)
+        df = pd.DataFrame({"x": rng.normal(size=300), "y": rng.normal(size=300), "price": rng.normal(size=300)})
+
+        assert "price" not in self._analyze(df, target_column="price").columns
+
+    def test_only_columns_a_model_reads_as_numbers_are_used(self):
+        rng = np.random.default_rng(8)
+        n = 400
+        df = pd.DataFrame(
+            {
+                "row_id": range(n),  # counts the rows: an identifier
+                "x": rng.normal(size=n),
+                "y": rng.normal(size=n),
+                "flag": rng.integers(0, 2, n),  # 0/1: a model reads it as a number
+                "answer": rng.choice(["yes", "no"], n),  # a boolean written as text
+                "city": rng.choice(["north", "south", "east"], n),
+                "constant": 7.0,
+            }
+        )
+
+        assert self._analyze(df).columns == ["x", "y", "flag"]
+
+    def test_rows_with_a_gap_are_left_out_and_counted(self):
+        rng = np.random.default_rng(9)
+        x = rng.normal(size=400)
+        x[:30] = np.nan
+        df = pd.DataFrame({"x": x, "y": rng.normal(size=400), "z": rng.normal(size=400)})
+
+        report = self._analyze(df)
+
+        assert (report.rows_used, report.rows_total) == (370, 400)
+
+    def test_one_numeric_column_is_nothing_to_compare(self):
+        rng = np.random.default_rng(10)
+        df = pd.DataFrame({"x": rng.normal(size=100), "city": rng.choice(["a", "b"], 100)})
+
+        report = self._analyze(df)
+
+        assert report.vif == {} and "two" in report.note
+
+    def test_fewer_rows_than_columns_is_said_rather_than_guessed(self):
+        """With no more rows than columns, any column is an exact combination of the others by chance."""
+        rng = np.random.default_rng(11)
+        df = pd.DataFrame({f"c{i}": rng.normal(size=8).round(3) for i in range(10)})
+
+        report = self._analyze(df)
+
+        assert report.vif == {} and report.exact_dependencies == []
+        assert "rows" in report.note
+
+    def test_the_share_any_column_explains_by_chance_is_given(self):
+        rng = np.random.default_rng(12)
+        df = pd.DataFrame({f"c{i}": rng.normal(size=60) for i in range(10)})
+
+        assert self._analyze(df).chance_r_squared == pytest.approx(9 / 59)
 
 
 if __name__ == "__main__":

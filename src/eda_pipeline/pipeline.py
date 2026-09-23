@@ -17,6 +17,7 @@ from .data_loader import discover_batch_files, load_data, replace_missing_placeh
 from .data_quality import SEVERITY_ORDER, Alert, DataQualityReport, analyze_data_quality
 from .html_report import generate_html_report
 from .logging_util import generate_correlation_id, setup_logging
+from .multicollinearity import analyze_multicollinearity
 from .outlier_detection import OutlierReport, analyze_outliers
 from .recommendations import build_recommendations
 from .relationships import RelationshipsReport, analyze_relationships
@@ -199,7 +200,7 @@ def _empty_data_quality_report(df: pd.DataFrame) -> DataQualityReport:
 def _empty_relationships_report() -> RelationshipsReport:
     """Fallback used when the relationships step itself fails."""
     return RelationshipsReport(
-        numeric_pairs=[], categorical_pairs=[], mixed_pairs=[], correlation_matrix=pd.DataFrame(), vif={}
+        numeric_pairs=[], categorical_pairs=[], mixed_pairs=[], correlation_matrix=pd.DataFrame()
     )
 
 
@@ -463,6 +464,18 @@ class EDAPipeline:
             default=_empty_relationships_report(),
         )
 
+        self.logger.info("Measuring multicollinearity...")
+        multicollinearity_report = self._run_step(
+            "multicollinearity",
+            failed_steps,
+            analyze_multicollinearity,
+            df,
+            column_types,
+            target_column=target_column,
+            default=None,
+        )
+        multicollinearity_summary = multicollinearity_report.to_summary() if multicollinearity_report else None
+
         self.logger.info("Detecting outliers...")
         outliers_report = self._run_step(
             "outliers",
@@ -631,6 +644,7 @@ class EDAPipeline:
             log_scale_columns=list(log_scale),
             floor_split_columns={col: asdict(check) for col, check in floor_split.items()},
             recommendations=recommendations,
+            multicollinearity=multicollinearity_report,
             default=None,
         )
 
@@ -672,8 +686,9 @@ class EDAPipeline:
                 "numeric_pairs_count": len(relationships_report.numeric_pairs),
                 "categorical_pairs_count": len(relationships_report.categorical_pairs),
                 "mixed_pairs_count": len(relationships_report.mixed_pairs),
-                "multicollinearity_vif": relationships_report.vif,
+                "multicollinearity_vif": multicollinearity_summary["vif"] if multicollinearity_summary else {},
             },
+            "multicollinearity": multicollinearity_summary,
             "outliers": {
                 "total_outlier_rows": len(outliers_report.outlier_indices_union),
                 "isolation_forest": {
