@@ -8,6 +8,7 @@ import re
 from html import unescape
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -1202,6 +1203,56 @@ class TestCopyColumnLists:
 
         assert 'data-copy-from="copy-list-num"' in html
         assert 'data-copy-from="copy-list-cat"' not in html
+
+
+class TestMulticollinearitySection:
+    """The multicollinearity block under the correlation matrices, and what reaches summary.json."""
+
+    @staticmethod
+    def _run(tmp_output_dir, df, name):
+        csv_file = tmp_output_dir / f"{name}.csv"
+        df.to_csv(csv_file, index=False)
+        result = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir)).run()[name]
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        return html, summary
+
+    def test_an_exact_identity_is_written_under_the_matrices(self, tmp_output_dir):
+        rng = np.random.default_rng(13)
+        first = rng.normal(900, 200, 200).round(1)
+        second = rng.normal(400, 150, 200).round(1)
+        df = pd.DataFrame(
+            {
+                "first_floor": first,
+                "second_floor": second,
+                "living_area": first + second,
+                "rooms": rng.normal(6, 2, 200).round(1),
+            }
+        )
+
+        html, summary = self._run(tmp_output_dir, df, "casas")
+
+        block = html.index('id="multicolinealidad"')
+        assert html.index("Association Between Columns") < block < html.index('id="preprocesamiento"')
+        assert 'href="#multicolinealidad"' in html
+        assert "living_area = first_floor + second_floor" in html[block:]
+        assert "The 3 columns of those combinations have an infinite VIF" in html[block:]
+
+        section = summary["multicollinearity"]
+        assert [dep["equation"] for dep in section["exact_dependencies"]] == ["living_area = first_floor + second_floor"]
+        assert section["suggested_drops"][0]["column"] == "living_area"
+        vif = summary["relationships"]["multicollinearity_vif"]
+        assert vif["living_area"] is None  # infinite: JSON has no such number
+        assert all(value is None or value >= 1 for value in vif.values())
+
+    def test_independent_columns_say_so(self, tmp_output_dir):
+        rng = np.random.default_rng(14)
+        df = pd.DataFrame({name: rng.normal(size=200).round(3) for name in ("alto", "ancho", "peso")})
+
+        html, summary = self._run(tmp_output_dir, df, "medidas")
+
+        assert "No column has a VIF of 5 or more" in html
+        assert summary["multicollinearity"]["exact_dependencies"] == []
 
 
 if __name__ == "__main__":

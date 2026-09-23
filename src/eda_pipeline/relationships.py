@@ -1,5 +1,5 @@
 """
-Relationship analysis: correlations, associations, multicollinearity detection.
+Relationship analysis: correlations and associations (multicollinearity is in multicollinearity.py).
 """
 
 import logging
@@ -232,31 +232,6 @@ def compute_correlation_matrix(df: pd.DataFrame, numeric_cols: list[str]) -> pd.
     return df_numeric.corr(method="pearson")
 
 
-def detect_multicollinearity(correlation_matrix: pd.DataFrame, vif_threshold: float = 10.0) -> dict[str, float]:
-    """
-    Detect multicollinearity using VIF (computed from inverse correlation matrix).
-
-    Args:
-        correlation_matrix: Correlation matrix
-        vif_threshold: VIF threshold for alerting
-
-    Returns:
-        Dictionary mapping column name to VIF
-    """
-    if correlation_matrix.empty or correlation_matrix.shape[0] < 2:
-        return {}
-
-    try:
-        # Compute inverse correlation matrix
-        inv_corr = np.linalg.inv(correlation_matrix.values)
-        # VIF is the diagonal of the inverse correlation matrix
-        vif = np.diag(inv_corr)
-        return {col: float(v) for col, v in zip(correlation_matrix.columns, vif)}
-    except np.linalg.LinAlgError:
-        # Singular matrix
-        return {}
-
-
 @dataclass
 class RelationshipsReport:
     """Complete relationships analysis results."""
@@ -265,7 +240,6 @@ class RelationshipsReport:
     categorical_pairs: list[CorrelationPair]
     mixed_pairs: list[CorrelationPair]
     correlation_matrix: pd.DataFrame
-    vif: dict[str, float]
     # Numeric and categorical together; empty when the step could not build it.
     association_matrix: pd.DataFrame = field(default_factory=pd.DataFrame)
 
@@ -281,13 +255,11 @@ def analyze_relationships(
     mixed_pairs = compute_mixed_associations(df, categorical_cols, numeric_cols, min_correlation)
 
     corr_matrix = compute_correlation_matrix(df, numeric_cols)
-    vif = detect_multicollinearity(corr_matrix)
 
     return RelationshipsReport(
         numeric_pairs=numeric_pairs,
         categorical_pairs=categorical_pairs,
         mixed_pairs=mixed_pairs,
         correlation_matrix=corr_matrix,
-        vif=vif,
         association_matrix=association_matrix(df, numeric_cols, categorical_cols),
     )
