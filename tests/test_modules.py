@@ -2,6 +2,7 @@
 Unit tests for EDA Pipeline modules.
 """
 
+import ast
 import json
 from pathlib import Path
 
@@ -28,7 +29,12 @@ from eda_pipeline.data_loader import (
     load_data,
 )
 from eda_pipeline.data_quality import analyze_data_quality, analyze_duplicates
-from eda_pipeline.html_report import column_quality_rows, overall_missing_pct, preview_rows
+from eda_pipeline.html_report import (
+    column_quality_rows,
+    overall_missing_pct,
+    preview_rows,
+    python_list_snippet,
+)
 from eda_pipeline.outlier_detection import (
     ISOLATION_FOREST_MIN_ROWS,
     detect_outliers_iqr,
@@ -2177,6 +2183,27 @@ class TestDatasetNaming:
     def test_the_submission_files_kaggle_ships_are_split_names_too(self):
         assert dataset_name_for(Path("d/titanic/gender_submission.csv")) == "titanic_gender_submission"
         assert dataset_name_for(Path("d/titanic/sample_submission.csv")) == "titanic_sample_submission"
+
+
+class TestColumnListSnippet:
+    """What the «Copy list» buttons put on the clipboard: `num = [...]` and `cat = [...]`."""
+
+    def test_the_list_reads_like_a_line_of_python(self):
+        assert python_list_snippet("num", ["Age", "RoomService", "Spa"]) == 'num = ["Age","RoomService","Spa"]'
+        assert python_list_snippet("cat", ["HomePlanet", "VIP"]) == 'cat = ["HomePlanet","VIP"]'
+
+    def test_any_name_pastes_back_as_exactly_itself(self):
+        names = ['price "USD"', "back\\slash", "año", "tab\there", "it's", "<b>zone</b>"]
+        variable, _, literal = python_list_snippet("cat", names).partition(" = ")
+        assert variable == "cat"
+        assert ast.literal_eval(literal) == names
+
+    def test_a_label_that_is_not_text_keeps_its_type(self):
+        """An Excel header like 2024 is an int to pandas: df[[2024]] works, df[["2024"]] does not."""
+        assert python_list_snippet("num", [2024, "total"]) == 'num = [2024,"total"]'
+
+    def test_no_columns_is_an_empty_list(self):
+        assert python_list_snippet("num", []) == "num = []"
 
 
 if __name__ == "__main__":
