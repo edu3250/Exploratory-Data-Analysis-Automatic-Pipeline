@@ -2,8 +2,10 @@
 Integration tests for the complete EDA Pipeline.
 """
 
+import ast
 import json
 import re
+from html import unescape
 from pathlib import Path
 
 import pandas as pd
@@ -1148,6 +1150,58 @@ class TestDatasetNamingEndToEnd:
         results = _make_pipeline(input_folder=str(folder), output_dir=str(tmp_output_dir / "out")).run()
 
         assert set(results) == {"Kaggle_Titanic_train", "Kaggle_Titanic_test", "passengers"}
+
+
+class TestCopyColumnLists:
+    """The «Copy list» buttons beside Numeric Columns and Categorical Columns."""
+
+    @staticmethod
+    def _copied(html: str, list_id: str) -> tuple:
+        """What a button copies, as the browser decodes it: the variable name and the list it holds."""
+        match = re.search(rf'<pre class="copy-list-text" id="{list_id}" hidden>(.*?)</pre>', html, re.S)
+        assert match, f"{list_id} is not in the report"
+        variable, _, literal = unescape(match.group(1)).partition(" = ")
+        return variable, ast.literal_eval(literal)
+
+    def test_each_button_copies_the_columns_its_table_shows(self, csv_file, tmp_output_dir):
+        result = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir)).run()["data"]
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        tables = Path(result["output_dir"]) / "tables"
+        numeric = pd.read_csv(tables / "numeric_stats.csv")["column"].tolist()
+        categorical = pd.read_csv(tables / "categorical_stats.csv")["column"].tolist()
+
+        assert self._copied(html, "copy-list-num") == ("num", numeric)
+        assert self._copied(html, "copy-list-cat") == ("cat", categorical)
+        # Free text, identifiers and dates have sections of their own and belong in neither list.
+        assert {"age", "income"} <= set(numeric) and {"gender", "region"} <= set(categorical)
+        for other in ("comment", "user_id", "signup_date"):
+            assert other not in numeric + categorical
+
+    def test_names_with_markup_characters_are_escaped_in_the_page(self, tmp_output_dir):
+        csv_file = tmp_output_dir / "gastos.csv"
+        pd.DataFrame(
+            {"R&D spend": [float(i) * 1.5 for i in range(42)], "it's": ["low", "mid", "high"] * 14}
+        ).to_csv(csv_file, index=False)
+
+        result = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir)).run()["gastos"]
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+
+        raw = re.search(r'id="copy-list-num" hidden>(.*?)</pre>', html, re.S).group(1)
+        assert "R&amp;D" in raw  # escaped in the markup...
+        assert self._copied(html, "copy-list-num") == ("num", ["R&D spend"])  # ...and exact once decoded
+        assert self._copied(html, "copy-list-cat") == ("cat", ["it's"])
+
+    def test_a_section_without_columns_has_no_button(self, tmp_output_dir):
+        csv_file = tmp_output_dir / "medidas.csv"
+        pd.DataFrame(
+            {"alto": [float(i) for i in range(40)], "ancho": [(i * 7) % 40 + 0.5 for i in range(40)]}
+        ).to_csv(csv_file, index=False)
+
+        result = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir)).run()["medidas"]
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+
+        assert 'data-copy-from="copy-list-num"' in html
+        assert 'data-copy-from="copy-list-cat"' not in html
 
 
 if __name__ == "__main__":
