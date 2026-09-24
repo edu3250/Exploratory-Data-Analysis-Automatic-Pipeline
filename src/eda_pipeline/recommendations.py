@@ -1,9 +1,9 @@
 """
 Preprocessing plan: the decisions the measurements settle on their own.
 
-The report closes with four steps in the order they are applied — descartar, imputar, codificar,
-escalar — and every line carries the measurement that produced it, so it can be checked instead of
-believed.
+The report closes with the steps in the order they are applied — convert, drop, fill in, encode,
+transform, scale — and every line carries the measurement that produced it, so it can be checked
+instead of believed.
 
 Only what the data decides is here. Whether a categorical variable is ordinal, and in what order its
 levels go, is not in the table: over the 89 categorical columns of ``data/raw`` an automatic rule
@@ -18,14 +18,17 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from .transforms import FIXED_SKEW, LOG1P, MIN_SKEW, TransformCheck, describe_attempt
+
 logger = logging.getLogger(__name__)
 
 STEP_CONVERT = "convert"
 STEP_DROP = "drop"
 STEP_IMPUTE = "impute"
 STEP_ENCODE = "encode"
+STEP_TRANSFORM = "transform"
 STEP_SCALE = "scale"
-STEP_ORDER = [STEP_CONVERT, STEP_DROP, STEP_IMPUTE, STEP_ENCODE, STEP_SCALE]
+STEP_ORDER = [STEP_CONVERT, STEP_DROP, STEP_IMPUTE, STEP_ENCODE, STEP_TRANSFORM, STEP_SCALE]
 
 # Numbering these would leave gaps: a report without numbers kept as text starts at "Drop",
 # and a "2." with no "1." above it reads as something missing. The order is the order of the sections.
@@ -34,6 +37,7 @@ STEP_LABELS = {
     STEP_DROP: "Drop",
     STEP_IMPUTE: "Fill in",
     STEP_ENCODE: "Encode",
+    STEP_TRANSFORM: "Transform",
     STEP_SCALE: "Scale",
 }
 
@@ -367,6 +371,68 @@ def encoding_recommendations(df, column_types, skip=(), target_column=None) -> l
     return recs
 
 
+def _before_and_after(check: TransformCheck) -> str:
+    return (
+        f"Skew {check.skew_before:.2f} → {check.skew_after:.2f}; its normal QQ plot straightens from "
+        f"r = {check.qq_r_before:.3f} to {check.qq_r_after:.3f}"
+    )
+
+
+def transform_recommendations(transforms, skip=(), target_column=None) -> list[Recommendation]:
+    """The skewed columns a transformation brings within ±FIXED_SKEW, and the target if it is one."""
+    if transforms is None:
+        return []
+    skip = set(skip)
+    fixed = [check for check in transforms.fixed if check.column not in skip and check.column != target_column]
+
+    recs = []
+    if fixed:
+        recs.append(
+            Recommendation(
+                step=STEP_TRANSFORM,
+                column=None,
+                action=(
+                    "Transform the columns below if your model is linear or works with distances "
+                    "(linear and logistic regression, SVM, kNN, k-means, PCA); trees and boosting do not need it"
+                ),
+                evidence=(
+                    f"{_plural(len(fixed), 'continuous column has', 'continuous columns have')} a skew beyond "
+                    f"±{MIN_SKEW:g} that a transformation brings within ±{FIXED_SKEW:g}, with a straighter QQ plot: "
+                    f"a long tail gives a few rows most of the weight in a fit or a distance. Their QQ plots are "
+                    f"under Charts"
+                ),
+            )
+        )
+    for check in fixed:
+        if check.method == LOG1P:
+            action = "log1p, the log of 1 + x"
+            evidence = _before_and_after(check)
+        else:
+            action = "Yeo-Johnson (sklearn's PowerTransformer), fitted on the training rows"
+            evidence = (
+                f"{_before_and_after(check)}; λ = {check.lmbda:.2f} on these rows; {describe_attempt(check, LOG1P)}"
+            )
+        recs.append(Recommendation(step=STEP_TRANSFORM, column=check.column, action=action, evidence=evidence))
+
+    target = transforms.target
+    if target is not None and target.fixed and target.column not in skip:
+        if target.method == LOG1P:
+            action = f"Model log1p({target.column}) and turn the predictions back with expm1"
+            evidence = _before_and_after(target)
+        else:
+            action = (
+                f"Model the Yeo-Johnson transform of {target.column} (PowerTransformer, fitted on the "
+                "training rows) and turn the predictions back with its inverse_transform"
+            )
+            evidence = (
+                f"{_before_and_after(target)}; λ = {target.lmbda:.2f} on these rows; {describe_attempt(target, LOG1P)}"
+            )
+        evidence += ". On the raw scale its largest values dominate the squared errors, whatever the model"
+        recs.append(Recommendation(step=STEP_TRANSFORM, column=target.column, action=action, evidence=evidence))
+
+    return recs
+
+
 def spread_ratio(stats) -> float:
     """Standard deviation over interquartile range; infinite when half the column is one value."""
     if stats is None or not np.isfinite(stats.std):
@@ -375,11 +441,17 @@ def spread_ratio(stats) -> float:
 
 
 def scaling_recommendations(
-    df, column_types, numeric_stats, log_scale_columns=(), skip=(), target_column=None
+    df, column_types, numeric_stats, log_scale_columns=(), skip=(), target_column=None, transformed=None
 ) -> list[Recommendation]:
-    """Whether the numeric columns live on comparable scales, and which scaler suits each one."""
+    """
+    Whether the numeric columns live on comparable scales, and which scaler suits each one.
+
+    ``transformed`` maps the columns the Transform step changes to their ``TransformCheck``: those are
+    scaled after it, on the distribution the transformation leaves.
+    """
     skip = set(skip)
     log_columns = set(log_scale_columns or ())
+    transformed = transformed or {}
     numeric_stats = numeric_stats or {}
 
     usable = [
@@ -434,7 +506,13 @@ def scaling_recommendations(
     for column in usable:
         stats = numeric_stats[column]
         ratio = spread_ratio(stats)
-        if column in log_columns:
+        if column in transformed:
+            action = "StandardScaler, after the transform"
+            evidence = (
+                f"Once transformed its skew is {transformed[column].skew_after:.2f}: the mean and the "
+                "standard deviation describe it"
+            )
+        elif column in log_columns:
             action = "Take log10, then StandardScaler"
             evidence = "Already drawn on a log scale: its tail eats the linear axis"
         elif not np.isfinite(ratio):
@@ -466,6 +544,7 @@ def build_recommendations(
     numeric_stats,
     correlation_matrix=None,
     log_scale_columns=(),
+    transforms=None,
     target_column=None,
 ) -> list[Recommendation]:
     """
@@ -478,10 +557,11 @@ def build_recommendations(
         numeric_stats: ``{column: NumericStats}`` from the univariate analysis.
         correlation_matrix: Numeric correlation matrix, to find redundant pairs.
         log_scale_columns: Columns already drawn on a log scale (rule D).
+        transforms: ``TransformReport``: the skewed columns, and the target, that a transformation fixes.
         target_column: Excluded from encoding and scaling; its gaps drop rows instead of being filled.
 
     Returns:
-        ``Recommendation`` list ordered by step: descartar, imputar, codificar, escalar.
+        ``Recommendation`` list ordered by step (STEP_ORDER).
     """
     if df is None or len(df) == 0 or not len(df.columns):
         return []
@@ -497,7 +577,16 @@ def build_recommendations(
     plan = conversions + drops + redundancy_recommendations(correlation_matrix, skip=pending)
     plan += imputation_recommendations(df, column_types, numeric_stats, quality, pending, target_column)
     plan += encoding_recommendations(df, column_types, pending, target_column)
-    plan += scaling_recommendations(df, column_types, numeric_stats, log_scale_columns, pending, target_column)
+    transform_plan = transform_recommendations(transforms, pending, target_column)
+    plan += transform_plan
+    transformed = {
+        check.column: check
+        for check in (transforms.fixed if transforms else [])
+        if check.column in {rec.column for rec in transform_plan}
+    }
+    plan += scaling_recommendations(
+        df, column_types, numeric_stats, log_scale_columns, pending, target_column, transformed
+    )
 
     logger.info(f"Preprocessing plan: {len(plan)} recommendation(s)")
     return plan

@@ -18,6 +18,7 @@ import seaborn as sns
 from matplotlib import MatplotlibDeprecationWarning
 
 from .relationships import correlation_ratio
+from .transforms import LOG1P, TransformCheck, TransformReport, apply_transform, qq_points
 from .type_inference import coerce_to_datetime, parse_time_of_day
 
 logger = logging.getLogger(__name__)
@@ -325,6 +326,40 @@ def plot_boxplot(series: pd.Series, output_path: Path, log_scale: bool = False, 
         log.set_title(_log_panel_title(len(valid) - len(positive)))
         log.set_ylabel(f"{series.name} (log)")
         fig.suptitle(f"Boxplot: {series.name}")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    return True
+
+
+def _draw_qq(ax, values: np.ndarray, title: str, ylabel: str) -> None:
+    theoretical, ordered, slope, intercept, _ = qq_points(values)
+    ax.scatter(theoretical, ordered, s=10, alpha=0.6)
+    ax.plot(theoretical, slope * theoretical + intercept, color="C3", linewidth=1.5)
+    ax.set_title(title)
+    ax.set_xlabel("Normal quantiles")
+    ax.set_ylabel(ylabel)
+
+
+@safe_plot
+def plot_qq_transform(series: pd.Series, check: TransformCheck | None, output_path: Path) -> bool:
+    """Normal QQ plot of a skewed column, beside the same plot after the transformation that fixes it."""
+    if check is None or not check.fixed:
+        return False
+    values = pd.to_numeric(series, errors="coerce").to_numpy(dtype=float)
+    values = values[np.isfinite(values)]
+    after = apply_transform(values, check.method, check.lmbda)
+
+    name = series.name
+    label = check.label if check.method == LOG1P else f"{check.label} (λ = {check.lmbda:.2f})"
+    fig, (before_ax, after_ax) = plt.subplots(1, 2, figsize=(14, 6))
+    _draw_qq(before_ax, values, f"As it is: skew {check.skew_before:.2f}, r = {check.qq_r_before:.3f}", str(name))
+    _draw_qq(
+        after_ax,
+        after,
+        f"{label}: skew {check.skew_after:.2f}, r = {check.qq_r_after:.3f}",
+        f"{check.label}({name})",
+    )
+    fig.suptitle(f"{name}: normal QQ plot before and after {check.label}")
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     return True
@@ -1012,6 +1047,7 @@ def generate_all_visualizations(
     pair_plot: PairPlotSpec | None = None,
     log_scale: dict[str, LogScaleCheck] | None = None,
     floor_split: dict[str, FloorSplitCheck] | None = None,
+    transforms: TransformReport | None = None,
 ) -> dict[str, list[str]]:
     """
     Generate all standard visualizations.
@@ -1043,6 +1079,22 @@ def generate_all_visualizations(
         if plot_boxplot(df[col], output_file, log_scale=col in log_cols, floor_split=splits.get(col)):
             box_files.append(str(output_file))
     plot_files["boxplots"] = box_files
+
+    # Skewed columns a transformation fixes: the normal QQ plot before it and after it
+    qq_files = []
+    for check in (transforms.fixed if transforms else [])[: config_viz.max_histograms]:
+        output_file = output_dir / f"qq_{str(check.column).replace('/', '_')}.png"
+        if plot_qq_transform(df[check.column], check, output_file):
+            qq_files.append(str(output_file))
+    plot_files["qq"] = qq_files
+
+    target_check = transforms.target if transforms else None
+    target_qq_file = output_dir / f"qq_{str(target_check.column).replace('/', '_')}.png" if target_check else None
+    plot_files["qq_target"] = (
+        [str(target_qq_file)]
+        if target_check and plot_qq_transform(df[target_check.column], target_check, target_qq_file)
+        else []
+    )
 
     # Categorical columns
     logger.info(f"Generating {len(categorical_cols)} bar charts...")

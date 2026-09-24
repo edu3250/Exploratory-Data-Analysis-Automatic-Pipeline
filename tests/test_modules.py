@@ -1792,6 +1792,7 @@ class TestPreprocessingRecommendations:
         """Build the plan from the same analyses the pipeline runs."""
         from eda_pipeline.recommendations import build_recommendations
         from eda_pipeline.relationships import compute_correlation_matrix
+        from eda_pipeline.transforms import analyze_transforms
         from eda_pipeline.type_inference import get_numeric_columns
         from eda_pipeline.visualizations import log_scale_columns
 
@@ -1804,6 +1805,7 @@ class TestPreprocessingRecommendations:
             numeric_stats=analyze_univariate(df, types).numeric_stats,
             correlation_matrix=compute_correlation_matrix(df, numeric_cols),
             log_scale_columns=log_scale_columns(df, types),
+            transforms=analyze_transforms(df, types, target_column=target_column),
             target_column=target_column,
         )
 
@@ -2098,15 +2100,87 @@ class TestPreprocessingRecommendations:
         assert "StandardScaler" in rec[0].action
         assert "agree" in rec[0].evidence
 
-    def test_a_column_already_drawn_on_a_log_scale_is_transformed_first(self):
-        from eda_pipeline.recommendations import STEP_SCALE
+    def test_a_column_on_a_log_scale_that_log1p_fixes_is_transformed_there_and_scaled_after(self):
+        from eda_pipeline.recommendations import STEP_SCALE, STEP_TRANSFORM
 
         rng = np.random.default_rng(0)
         plan = self._plan(self._frame(monto=rng.lognormal(mean=13, sigma=2.5, size=300)))
 
+        assert "log1p" in self._rows(plan, step=STEP_TRANSFORM, column="monto")[0].action
         rec = self._rows(plan, step=STEP_SCALE, column="monto")
         assert len(rec) == 1
+        assert "after the transform" in rec[0].action
+        assert "log10" not in rec[0].action  # one transformation per column, and it is in its own step
+
+    def test_a_column_on_a_log_scale_that_no_transformation_reaches_keeps_log10(self):
+        """numero_creditos: its lowest value fills 30% of the rows, so it is not a transform candidate."""
+        from eda_pipeline.recommendations import STEP_SCALE, STEP_TRANSFORM
+
+        rng = np.random.default_rng(3)
+        creditos = np.concatenate([np.ones(90), rng.lognormal(3, 2.0, 210).round(0) + 2])
+        plan = self._plan(self._frame(creditos=creditos))
+
+        assert self._rows(plan, step=STEP_TRANSFORM, column="creditos") == []
+        rec = self._rows(plan, step=STEP_SCALE, column="creditos")
+        assert len(rec) == 1
         assert "log10" in rec[0].action
+
+    # --- transform -------------------------------------------------------------------------
+
+    def test_a_skewed_column_a_transformation_fixes_gets_a_transform_line(self):
+        from eda_pipeline.recommendations import STEP_TRANSFORM
+
+        plan = self._plan(self._frame())
+
+        rows = self._rows(plan, step=STEP_TRANSFORM)
+        table_level = [r for r in rows if r.column is None]
+        assert len(table_level) == 1
+        assert "trees" in table_level[0].action  # says which models do not need it
+        rec = self._rows(plan, step=STEP_TRANSFORM, column="monto")
+        assert len(rec) == 1
+        assert "log1p" in rec[0].action
+        assert "Skew" in rec[0].evidence and "→" in rec[0].evidence
+        assert self._rows(plan, step=STEP_TRANSFORM, column="medida") == []  # symmetric already
+
+    def test_yeo_johnson_says_why_log1p_was_not_enough(self):
+        from eda_pipeline.recommendations import STEP_TRANSFORM
+
+        sotano = np.random.default_rng(1).lognormal(7, 0.6, 300)
+        sotano[:12] = 0
+        plan = self._plan(self._frame(sotano=sotano))
+
+        rec = self._rows(plan, step=STEP_TRANSFORM, column="sotano")
+        assert len(rec) == 1
+        assert "Yeo-Johnson" in rec[0].action and "training rows" in rec[0].action
+        assert "log1p leaves a skew of" in rec[0].evidence
+
+    def test_a_skew_no_transformation_fixes_gets_no_transform_line(self):
+        from eda_pipeline.recommendations import STEP_SCALE, STEP_TRANSFORM
+
+        rng = np.random.default_rng(1)
+        valores = np.concatenate([rng.normal(100, 5, 270), rng.normal(900, 50, 30)])
+        plan = self._plan(self._frame(sesgada=valores))
+
+        assert self._rows(plan, step=STEP_TRANSFORM, column="sesgada") == []
+        assert "RobustScaler" in self._rows(plan, step=STEP_SCALE, column="sesgada")[0].action
+
+    def test_no_transform_step_when_nothing_is_skewed(self):
+        from eda_pipeline.recommendations import STEP_TRANSFORM
+
+        rng = np.random.default_rng(0)
+        df = pd.DataFrame({"peso": rng.normal(70, 10, 300), "altura": rng.normal(170, 12, 300)})
+        assert self._rows(self._plan(df), step=STEP_TRANSFORM) == []
+
+    def test_a_skewed_target_is_modelled_on_its_transform(self):
+        from eda_pipeline.recommendations import STEP_TRANSFORM
+
+        df = self._frame(precio=np.random.default_rng(4).lognormal(12, 0.5, 300))
+        plan = self._plan(df, target_column="precio")
+
+        rec = self._rows(plan, step=STEP_TRANSFORM, column="precio")
+        assert len(rec) == 1
+        assert "log1p(precio)" in rec[0].action and "expm1" in rec[0].action
+        assert "whatever the model" in rec[0].evidence
 
     # --- target and ordering ---------------------------------------------------------------
 
@@ -2365,6 +2439,200 @@ class TestMulticollinearity:
         df = pd.DataFrame({f"c{i}": rng.normal(size=60) for i in range(10)})
 
         assert self._analyze(df).chance_r_squared == pytest.approx(9 / 59)
+
+
+class TestTransforms:
+    """Which skewed columns a transformation brings close to normal, measured before and after."""
+
+    @staticmethod
+    def _series(values, name="monto") -> pd.Series:
+        return pd.Series(np.asarray(values, dtype=float), name=name)
+
+    def test_a_long_right_tail_is_fixed_by_log1p(self):
+        from eda_pipeline.transforms import FIXED_SKEW, LOG1P, check_transform
+
+        check = check_transform(self._series(np.random.default_rng(0).lognormal(10, 0.8, 1000)))
+
+        assert check.method == LOG1P and check.fixed
+        assert check.skew_before > 2
+        assert abs(check.skew_after) < FIXED_SKEW
+        assert check.qq_r_before < 0.9 < 0.99 < check.qq_r_after
+
+    def test_yeo_johnson_takes_over_when_log1p_overshoots(self):
+        # TotalBsmtSF: the 37 houses without a basement sit at 0, and log1p throws them far to the left.
+        from eda_pipeline.transforms import FIXED_SKEW, YEO_JOHNSON, check_transform
+
+        values = np.random.default_rng(1).lognormal(7, 0.6, 1000)
+        values[:40] = 0
+        check = check_transform(self._series(values, "sotano"))
+
+        assert check.method == YEO_JOHNSON
+        assert check.log1p_skew < -FIXED_SKEW  # measured, and reported, even though it was not chosen
+        assert abs(check.skew_after) < FIXED_SKEW
+        assert check.lmbda is not None
+
+    def test_negative_values_rule_out_log1p(self):
+        from eda_pipeline.transforms import YEO_JOHNSON, check_transform
+
+        check = check_transform(self._series(np.random.default_rng(3).lognormal(3, 0.7, 1000) - 15, "margen"))
+
+        assert check.log1p_skew is None
+        assert check.method == YEO_JOHNSON
+
+    def test_a_skew_no_transformation_fixes_is_kept_without_a_method(self):
+        """A far cluster of 15% of the rows: neither log1p nor Yeo-Johnson can pull it in."""
+        from eda_pipeline.transforms import FIXED_SKEW, check_transform
+
+        rng = np.random.default_rng(7)
+        check = check_transform(self._series(np.concatenate([rng.normal(100, 5, 850), rng.normal(1000, 5, 150)])))
+
+        assert check is not None and not check.fixed
+        assert check.method is None and check.skew_after is None and check.qq_r_after is None
+        assert abs(check.log1p_skew) > FIXED_SKEW and abs(check.yeo_johnson_skew) > FIXED_SKEW
+
+    def test_a_lower_skew_without_a_straighter_qq_plot_does_not_count(self):
+        # TotalBsmtSF under Yeo-Johnson: skew 1.52 -> 0.23, but r 0.97501 -> 0.97536, because the 37
+        # houses without a basement stay apart. Every other column that got within ±0.5 gained 0.014+.
+        from eda_pipeline.transforms import is_fixed_by
+
+        assert not is_fixed_by(0.23, 0.97501, 0.97536)
+        assert is_fixed_by(0.03, 0.948, 0.962)  # porcentaje_cobertura, the smallest real gain
+        assert not is_fixed_by(0.6, 0.90, 0.99)  # straighter, but still skewed
+        assert not is_fixed_by(None, 0.90, None)  # the transformation could not be applied
+
+    def test_each_attempt_says_why_it_was_not_the_one(self):
+        from eda_pipeline.transforms import TransformCheck, describe_attempts
+
+        basement = TransformCheck(
+            column="TotalBsmtSF",
+            method=None,
+            rows=1460,
+            skew_before=1.52,
+            qq_r_before=0.97501,
+            skew_after=None,
+            qq_r_after=None,
+            log1p_skew=-5.15,
+            log1p_qq_r=0.6385,
+            yeo_johnson_skew=0.23,
+            yeo_johnson_qq_r=0.97536,
+            lmbda=0.74,
+        )
+
+        text = describe_attempts(basement)
+        assert "log1p leaves a skew of -5.15" in text
+        assert "Yeo-Johnson brings the skew to 0.23 but does not straighten its QQ plot" in text
+
+    def test_a_symmetric_column_is_not_checked(self):
+        from eda_pipeline.transforms import check_transform
+
+        assert check_transform(self._series(np.random.default_rng(4).normal(50, 5, 1000))) is None
+
+    def test_a_column_filled_by_its_lowest_value_is_not_checked(self):
+        # RoomService: 65% zeros. Its QQ plot is a flat run and a hook, and no transformation straightens it.
+        from eda_pipeline.transforms import check_transform
+
+        rng = np.random.default_rng(5)
+        values = np.concatenate([np.zeros(650), rng.lognormal(5, 1.5, 350)])
+        assert check_transform(self._series(values, "gasto")) is None
+
+    def test_a_column_with_few_distinct_values_is_not_checked(self):
+        # Parch, SibSp: a QQ plot of 7 values is a staircase.
+        from eda_pipeline.transforms import check_transform
+
+        tiers = [2, 3, 4, 5, 8, 13, 21, 34, 55, 89]  # skewed, and the lowest holds only 20% of the rows
+        shares = [0.2, 0.2, 0.15, 0.12, 0.1, 0.08, 0.06, 0.05, 0.03, 0.01]
+        values = np.random.default_rng(6).choice(tiers, size=1000, p=shares)
+        assert check_transform(self._series(values, "talla")) is None
+
+    def test_missing_values_are_left_out_of_the_measurement(self):
+        from eda_pipeline.transforms import check_transform
+
+        values = np.random.default_rng(0).lognormal(10, 0.8, 1000)
+        with_gaps = np.concatenate([values, [np.nan] * 200])
+        assert check_transform(self._series(with_gaps)).rows == 1000
+
+    def test_the_qq_plot_is_drawn_from_a_fixed_number_of_quantiles(self):
+        from eda_pipeline.transforms import QQ_POINTS, qq_points
+
+        theoretical, ordered, slope, intercept, r = qq_points(np.random.default_rng(0).normal(0, 1, 50_000))
+
+        assert len(theoretical) == len(ordered) == QQ_POINTS
+        assert r > 0.999 and slope == pytest.approx(1, abs=0.05) and intercept == pytest.approx(0, abs=0.05)
+
+    def test_the_target_is_checked_apart_from_the_columns(self):
+        from eda_pipeline.transforms import analyze_transforms
+
+        rng = np.random.default_rng(8)
+        df = pd.DataFrame(
+            {
+                "monto": rng.lognormal(10, 0.8, 500),
+                "medida": rng.normal(50, 5, 500),
+                "precio": rng.lognormal(12, 0.5, 500),
+                "hijos": rng.poisson(0.5, 500).astype(float),
+            }
+        )
+        types = {
+            "monto": "numeric_continuous",
+            "medida": "numeric_continuous",
+            "precio": "numeric_continuous",
+            "hijos": "numeric_discrete",
+        }
+
+        report = analyze_transforms(df, types, target_column="precio")
+
+        assert list(report.columns) == ["monto"]
+        assert report.target.column == "precio" and report.target.fixed
+        assert [check.column for check in report.fixed] == ["monto"]
+
+    def test_a_classification_target_is_not_transformed(self):
+        from eda_pipeline.transforms import analyze_transforms
+
+        df = pd.DataFrame({"codigo": np.random.default_rng(9).lognormal(3, 1, 300)})
+        report = analyze_transforms(
+            df, {"codigo": "numeric_continuous"}, target_column="codigo", target_type="classification"
+        )
+        assert report.target is None and report.columns == {}
+
+    def test_the_summary_is_plain_json(self):
+        from eda_pipeline.transforms import analyze_transforms
+
+        rng = np.random.default_rng(7)
+        df = pd.DataFrame(
+            {
+                "monto": rng.lognormal(10, 0.8, 1000),
+                "lejano": np.concatenate([rng.normal(100, 5, 850), rng.normal(1000, 5, 150)]),
+            }
+        )
+        summary = analyze_transforms(df, dict.fromkeys(df.columns, "numeric_continuous")).to_summary()
+
+        decoded = json.loads(json.dumps(summary, allow_nan=False))
+        assert decoded["columns"]["monto"]["method"] == "log1p"
+        assert decoded["columns"]["lejano"]["method"] is None
+        assert decoded["target"] is None
+
+    def test_the_qq_plot_shows_before_and_after_side_by_side(self, tmp_output_dir):
+        import matplotlib.image as mpimg
+
+        from eda_pipeline.transforms import check_transform
+        from eda_pipeline.visualizations import plot_qq_transform
+
+        series = self._series(np.random.default_rng(0).lognormal(10, 0.8, 1000))
+        output = tmp_output_dir / "qq_monto.png"
+
+        assert plot_qq_transform(series, check_transform(series), output) is True
+        height, width = mpimg.imread(output).shape[:2]
+        assert width > 1.8 * height  # two panels
+
+    def test_no_qq_plot_when_no_transformation_fixes_the_column(self, tmp_output_dir):
+        from eda_pipeline.transforms import check_transform
+        from eda_pipeline.visualizations import plot_qq_transform
+
+        rng = np.random.default_rng(7)
+        series = self._series(np.concatenate([rng.normal(100, 5, 850), rng.normal(1000, 5, 150)]))
+        output = tmp_output_dir / "qq_lejano.png"
+
+        assert plot_qq_transform(series, check_transform(series), output) is False
+        assert not output.exists()
 
 
 if __name__ == "__main__":

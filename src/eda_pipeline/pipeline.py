@@ -23,6 +23,7 @@ from .recommendations import build_recommendations
 from .relationships import RelationshipsReport, analyze_relationships
 from .tables import write_result_tables
 from .target_analysis import analyze_target
+from .transforms import analyze_transforms
 from .type_inference import (
     apply_column_type_overrides,
     get_categorical_columns,
@@ -522,6 +523,18 @@ class EDAPipeline:
             self._run_step("floor_split", failed_steps, floor_split_columns, df, column_types, default={}) or {}
         )
 
+        self.logger.info("Checking which skewed columns a transformation fixes...")
+        transforms = self._run_step(
+            "transforms",
+            failed_steps,
+            analyze_transforms,
+            df,
+            column_types,
+            target_column=target_column,
+            target_type=target_report.target_type if target_report else None,
+            default=None,
+        )
+
         self.logger.info("Choosing the pair plot...")
         pair_plot = self._run_step(
             "pair_plot",
@@ -546,6 +559,7 @@ class EDAPipeline:
                 numeric_stats=univariate_report.numeric_stats,
                 correlation_matrix=relationships_report.correlation_matrix,
                 log_scale_columns=log_scale,
+                transforms=transforms,
                 target_column=target_column,
                 default=[],
             )
@@ -577,6 +591,7 @@ class EDAPipeline:
                 pair_plot=pair_plot,
                 log_scale=log_scale,
                 floor_split=floor_split,
+                transforms=transforms,
                 default={},
             )
             or {}
@@ -645,6 +660,7 @@ class EDAPipeline:
             floor_split_columns={col: asdict(check) for col, check in floor_split.items()},
             recommendations=recommendations,
             multicollinearity=multicollinearity_report,
+            transforms=transforms,
             default=None,
         )
 
@@ -701,6 +717,7 @@ class EDAPipeline:
             "pair_plot": asdict(pair_plot) if pair_plot else None,
             "log_scale_columns": {col: asdict(check) for col, check in log_scale.items()},
             "floor_split_columns": {col: asdict(check) for col, check in floor_split.items()},
+            "transforms": transforms.to_summary() if transforms else None,
             "recommendations": [asdict(rec) for rec in recommendations],
             "failed_steps": failed_steps,
         }
