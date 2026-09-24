@@ -15,6 +15,7 @@ from jinja2 import Template
 
 from .multicollinearity import CHANCE_R_SQUARED_WARNING, HIGH_VIF, SHOWN_VIF
 from .recommendations import recommendations_by_step
+from .transforms import FIXED_SKEW, MAX_FLOOR_PCT, MIN_DISTINCT, MIN_QQ_GAIN, MIN_SKEW, describe_attempts
 from .type_inference import dtype_label, semantic_type_label
 from .visualizations import (
     FLOOR_SPLIT_MIN_DISTINCT,
@@ -393,6 +394,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             {% if target_analysis %}<li><a href="#target">Target</a></li>{% endif %}
             <li><a href="#visualizaciones">Charts</a></li>
             {% if multicollinearity %}<li><a href="#multicolinealidad">Multicollinearity</a></li>{% endif %}
+            {% if transforms and transforms.columns %}<li><a href="#transformaciones">Skewed Columns</a></li>{% endif %}
             {% if recommendation_steps %}<li><a href="#preprocesamiento">Preprocessing Plan</a></li>{% endif %}
         </ul>
     </div>
@@ -707,6 +709,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
         {% endif %}
 
+        {% if transforms and transforms.target %}
+        {% set skewed_target = transforms.target %}
+        <h3>Skew of the Target</h3>
+        {% if skewed_target.fixed %}
+        <p><strong>{{ skewed_target.column | e }}</strong> has a skew of {{ "%.2f" | format(skewed_target.skew_before) }}.
+           Modelled as {{ skewed_target.label }}({{ skewed_target.column | e }}), its skew is {{ "%.2f" | format(skewed_target.skew_after) }}
+           and its normal QQ plot straightens (r = {{ "%.3f" | format(skewed_target.qq_r_before) }} → {{ "%.3f" | format(skewed_target.qq_r_after) }}).
+           On the raw scale its largest values would dominate the squared errors, whatever the model; the
+           Transform step of the Preprocessing Plan says how to turn the predictions back.</p>
+        {% if plots.qq_target %}
+        <div class="plot-container">
+            <img src="data:image/png;base64,{{ plots.qq_target[0] }}" alt="QQ plot of the target">
+        </div>
+        {% endif %}
+        {% else %}
+        <p><strong>{{ skewed_target.column | e }}</strong> has a skew of {{ "%.2f" | format(skewed_target.skew_before) }},
+           and neither transformation both brings it within ±{{ "%g" | format(fixed_skew) }} and straightens its QQ plot:
+           {{ describe_attempts(skewed_target) }}.</p>
+        {% endif %}
+        {% endif %}
+
         {% if target_analysis.feature_relationships %}
         <h3>Columns Most Related to the Target</h3>
         <table>
@@ -889,6 +912,35 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
             {% endfor %}
         </div>
+        {% endif %}
+
+        {% if transforms and transforms.columns %}
+        <h3 id="transformaciones">Skewed Columns, Before and After a Transformation</h3>
+        <p>A normal QQ plot sets a column's values against the values a normal distribution would have in the
+           same positions: on the red line, the column is normal, and a tail that bends away from it is longer
+           than a normal one. Checked here: the continuous columns with a skew beyond ±{{ "%g" | format(min_skew) }},
+           more than {{ min_distinct }} distinct values, and their lowest value on less than {{ "%g" | format(max_floor_pct) }}%
+           of the rows, since no transformation straightens a pile of identical values. A column is drawn when a
+           transformation brings its skew within ±{{ "%g" | format(fixed_skew) }} and makes its QQ plot straighter (r up by
+           at least {{ "%g" | format(min_qq_gain) }}): log1p, the log of 1 + x, when that is
+           enough, since it is the easier one to read back, and Yeo-Johnson otherwise, which also takes negative
+           values. Linear models, the ones that work with distances (kNN, SVM, k-means) and PCA gain from it;
+           trees and boosting do not need it.</p>
+        {% if transforms.unfixed %}
+        <p>Skewed, but neither transformation both brings them within ±{{ "%g" | format(fixed_skew) }} and straightens
+           their QQ plot:
+            {% for check in transforms.unfixed %}<strong>{{ check.column | e }}</strong>
+            (skew {{ "%.2f" | format(check.skew_before) }}: {{ describe_attempts(check) }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>
+        {% endif %}
+        {% if plots.qq %}
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+            {% for img in plots.qq %}
+            <div class="plot-container">
+                <img src="data:image/png;base64,{{ img }}" alt="QQ plot before and after">
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
         {% endif %}
 
         {% if plots.categorical %}
@@ -1129,6 +1181,7 @@ def generate_html_report(
     floor_split_columns: Optional[dict] = None,
     recommendations: Optional[list] = None,
     multicollinearity=None,
+    transforms=None,
 ) -> str:
     """
     Generate HTML report with embedded base64 images.
@@ -1145,6 +1198,8 @@ def generate_html_report(
         floor_split_columns: ``{column: FloorSplitCheck as a dict}`` for the columns drawn again
             without the repeated lowest value that fills them.
         recommendations: The preprocessing plan (``Recommendation`` list), shown as the last section.
+        multicollinearity: ``MulticollinearityReport``, shown under the correlation matrices.
+        transforms: ``TransformReport``: skewed columns under the boxplots, a skewed target in its section.
 
     Returns:
         Path to generated HTML file
@@ -1175,6 +1230,13 @@ def generate_html_report(
         "numeric_stats": numeric_stats,
         "categorical_stats": categorical_stats,
         "multicollinearity": multicollinearity,
+        "transforms": transforms,
+        "describe_attempts": describe_attempts,
+        "min_skew": MIN_SKEW,
+        "fixed_skew": FIXED_SKEW,
+        "min_qq_gain": MIN_QQ_GAIN,
+        "max_floor_pct": MAX_FLOOR_PCT,
+        "min_distinct": MIN_DISTINCT,
         "format_vif": format_vif,
         "high_vif": HIGH_VIF,
         "shown_vif": SHOWN_VIF,

@@ -445,7 +445,7 @@ class TestOutputCompleteness:
         assert expected.issubset({p.name for p in tables_dir.glob("*.csv")})
 
     def test_the_report_closes_with_a_preprocessing_plan(self, tmp_output_dir):
-        """The last section: what to drop, impute, encode and scale, each line with its measurement."""
+        """The last section: what to drop, impute, encode, transform and scale, each line with its measurement."""
         import numpy as np
 
         rng = np.random.default_rng(0)
@@ -470,18 +470,19 @@ class TestOutputCompleteness:
         assert summary["failed_steps"] == []
 
         plan = summary["recommendations"]
-        assert {rec["step"] for rec in plan} == {"drop", "impute", "encode", "scale"}
+        assert {rec["step"] for rec in plan} == {"drop", "impute", "encode", "transform", "scale"}
         dropped = {rec["column"] for rec in plan if rec["step"] == "drop"}
         assert {"cliente_id", "comentario"} <= dropped
         assert [r for r in plan if r["column"] == "edad" and r["step"] == "impute"]
         assert [r for r in plan if r["column"] == "region" and r["step"] == "encode"]
+        assert [r for r in plan if r["column"] == "monto" and r["step"] == "transform"]  # lognormal
         # A dropped column is not carried into the later steps.
         assert [r for r in plan if r["column"] == "cliente_id"] == [
             r for r in plan if r["column"] == "cliente_id" and r["step"] == "drop"
         ]
 
         table = pd.read_csv(Path(result["output_dir"]) / "tables" / "recommendations.csv")
-        assert set(table["step"]) == {"drop", "impute", "encode", "scale"}
+        assert set(table["step"]) == {"drop", "impute", "encode", "transform", "scale"}
         assert table["evidence"].notna().all()
 
         html = Path(result["html_report"]).read_text(encoding="utf-8")
@@ -1253,6 +1254,88 @@ class TestMulticollinearitySection:
 
         assert "No column has a VIF of 5 or more" in html
         assert summary["multicollinearity"]["exact_dependencies"] == []
+
+
+class TestTransformSection:
+    """QQ plots before and after a transformation: for the columns under Charts, for the target in its section."""
+
+    @staticmethod
+    def _run(tmp_output_dir, df, name, **config):
+        csv_file = tmp_output_dir / f"{name}.csv"
+        df.to_csv(csv_file, index=False)
+        result = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir), **config).run()[name]
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        return result, html, summary
+
+    @staticmethod
+    def _block(html: str) -> str:
+        """The transformations block: from its heading to the next heading or the end of Charts."""
+        start = html.index('id="transformaciones"')
+        ends = [html.find(marker, start + 1) for marker in ("<h3", "</section>")]
+        return html[start : min(end for end in ends if end != -1)]
+
+    @staticmethod
+    def _frame(n=400, seed=21) -> pd.DataFrame:
+        rng = np.random.default_rng(seed)
+        return pd.DataFrame(
+            {
+                "monto": rng.lognormal(10, 0.8, n).round(2),
+                "medida": rng.normal(50, 5, n).round(2),
+                "lejano": np.concatenate([rng.normal(100, 5, n - n // 7), rng.normal(1000, 5, n // 7)]).round(2),
+                "gasto": np.concatenate([np.zeros(n * 2 // 3), rng.lognormal(5, 1.5, n - n * 2 // 3)]).round(2),
+            }
+        )
+
+    def test_skewed_columns_are_drawn_before_and_after_their_transformation(self, tmp_output_dir):
+        result, html, summary = self._run(tmp_output_dir, self._frame(), "cuentas")
+
+        block = html.index('id="transformaciones"')
+        assert html.index("<h3>Boxplots") < block < html.index('id="preprocesamiento"')
+        assert 'href="#transformaciones"' in html
+        section = self._block(html)
+        assert section.count("<img") == 1  # monto; lejano has no transformation that fixes it
+        assert "lejano" in section and "neither" in section
+
+        columns = summary["transforms"]["columns"]
+        assert columns["monto"]["method"] == "log1p"
+        assert columns["lejano"]["method"] is None
+        assert "gasto" not in columns and "medida" not in columns  # a pile of zeros; symmetric already
+        assert (Path(result["output_dir"]) / "plots" / "qq_monto.png").exists()
+
+        plan = html[html.index('id="preprocesamiento"') :]
+        assert "<h3>Transform (" in plan
+        assert plan.index("<h3>Transform (") < plan.index("<h3>Scale (")
+
+    def test_a_skewed_target_gets_its_qq_plot_in_the_target_section(self, tmp_output_dir):
+        df = self._frame()
+        df["precio"] = np.random.default_rng(22).lognormal(12, 0.5, len(df)).round(0)
+
+        _, html, summary = self._run(tmp_output_dir, df, "casas", target=TargetConfig(target_column="precio"))
+
+        target = html[html.index('id="target"') : html.index('id="visualizaciones"')]
+        assert "Skew of the Target" in target and "<img" in target
+        assert summary["transforms"]["target"]["column"] == "precio"
+        assert summary["transforms"]["target"]["method"] == "log1p"
+        assert "precio" not in summary["transforms"]["columns"]
+        assert "log1p(precio)" in html[html.index('id="preprocesamiento"') :]
+
+    def test_no_skewed_column_no_section(self, tmp_output_dir):
+        rng = np.random.default_rng(23)
+        df = pd.DataFrame({name: rng.normal(size=200).round(3) for name in ("alto", "ancho", "peso")})
+
+        _, html, summary = self._run(tmp_output_dir, df, "medidas")
+
+        assert 'id="transformaciones"' not in html
+        assert summary["transforms"] == {"columns": {}, "target": None}
+
+    def test_column_names_with_markup_are_escaped(self, tmp_output_dir):
+        df = self._frame().rename(columns={"lejano": "a<b"})
+
+        _, html, _ = self._run(tmp_output_dir, df, "marcas")
+
+        section = self._block(html)
+        assert "a&lt;b" in section and "a<b" not in section
 
 
 if __name__ == "__main__":
