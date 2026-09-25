@@ -8,10 +8,9 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-from scipy.stats import chi2_contingency, kruskal
-from sklearn.feature_selection import mutual_info_regression
+from scipy.stats import chi2_contingency, kruskal, spearmanr
 
-from .relationships import correlation_ratio
+from .relationships import adjusted_correlation_ratio, cramers_v
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +19,23 @@ logger = logging.getLogger(__name__)
 # the spaceship table with an effect of 1.000 and Name with 0.999. Dates and times are not compared
 # either; the report charts them over time instead.
 UNTESTABLE_TYPES = ("identifier", "text", "datetime", "time", "constant")
+
+# Which test fits depends on the kind of target and of column, and every effect runs from 0 to 1 so
+# one table can rank them all:
+#
+#                        numeric column                       categorical column
+#   numeric target       |Spearman| (its p-value)             adjusted eta (Kruskal-Wallis)
+#   class target         adjusted eta (Kruskal-Wallis)        Cramér's V, bias-corrected (chi²)
+#
+# Chi² against a numeric target crossed each category with each distinct value of it: on Housing
+# every categorical column came out between 0.69 and 0.81, Street (one value on 99.6% of the rows)
+# third with 0.780, and the numeric columns, measured by mutual information on another scale, did
+# not reach the top 20. Over data/raw, with every continuous column tried as a target, a shuffled
+# target gave that chi² a median effect of 0.50; adjusted eta gives 0.00, and |Spearman| 0.02.
+# Near-constant columns in the top 5 went from 19 of the 91 targets to 2, and numeric columns from
+# 38% of the top 5 to 69%. For class targets, the corrected V and the adjusted eta take the shuffled
+# effects' 99th percentile from 0.34 to 0.24 and from 0.24 to 0.14; the real targets (Spaceship,
+# penguins, stroke) keep the same ranking.
 
 
 @dataclass
@@ -30,7 +46,7 @@ class FeatureTargetRelationship:
     test_statistic: float
     p_value: float
     test_name: str
-    effect_size: Optional[float] = None  # Cramér's V, eta, mutual information
+    effect_size: Optional[float] = None  # 0 to 1: |Spearman|, adjusted eta or corrected Cramér's V
     support: int = 0  # Number of samples used
 
 
@@ -126,40 +142,43 @@ def analyze_class_balance(series: pd.Series, imbalance_threshold: float = 0.8) -
     )
 
 
-def test_feature_target_categorical(feature: pd.Series, target: pd.Series) -> FeatureTargetRelationship:
+def test_feature_target_categorical(
+    feature: pd.Series, target: pd.Series, is_target_numeric: bool = False
+) -> FeatureTargetRelationship:
     """
-    Test association between categorical feature and target (chi-square).
+    Test association between a categorical feature and the target.
+    - If target is categorical: chi-square, with the bias-corrected Cramér's V as effect
+    - If target is numeric: Kruskal-Wallis across the categories, with the adjusted eta as effect
     """
     valid = pd.DataFrame({"feature": feature, "target": target}).dropna()
+    test_name = "kruskal_wallis" if is_target_numeric else "chi2"
 
     if len(valid) < 2:
         return FeatureTargetRelationship(
-            feature=feature.name or "unknown", test_statistic=np.nan, p_value=np.nan, test_name="chi2"
+            feature=feature.name or "unknown", test_statistic=np.nan, p_value=np.nan, test_name=test_name
         )
 
-    ct = pd.crosstab(valid["feature"], valid["target"])
     try:
-        chi2, p, _, _ = chi2_contingency(ct)
-
-        # Cramér's V as effect size
-        min_dim = min(ct.shape[0] - 1, ct.shape[1] - 1)
-        if min_dim > 0:
-            v = np.sqrt(chi2 / (len(valid) * min_dim))
+        if is_target_numeric:
+            groups = [group["target"].values for _, group in valid.groupby("feature")]
+            statistic, p = kruskal(*groups)
+            effect = adjusted_correlation_ratio(valid["feature"].astype(str), valid["target"])
         else:
-            v = 0
+            statistic, p, _, _ = chi2_contingency(pd.crosstab(valid["feature"], valid["target"]))
+            effect = cramers_v(valid["feature"].astype(str), valid["target"].astype(str))
 
         return FeatureTargetRelationship(
             feature=feature.name or "unknown",
-            test_statistic=chi2,
+            test_statistic=float(statistic),
             p_value=float(p),
-            test_name="chi2",
-            effect_size=float(v),
+            test_name=test_name,
+            effect_size=float(effect),
             support=len(valid),
         )
     except Exception as e:
-        logger.debug(f"Chi-square test failed for {feature.name}: {e}")
+        logger.debug(f"{test_name} failed for {feature.name}: {e}")
         return FeatureTargetRelationship(
-            feature=feature.name or "unknown", test_statistic=np.nan, p_value=np.nan, test_name="chi2"
+            feature=feature.name or "unknown", test_statistic=np.nan, p_value=np.nan, test_name=test_name
         )
 
 
@@ -168,8 +187,8 @@ def test_feature_target_numeric(
 ) -> FeatureTargetRelationship:
     """
     Test association between numeric feature and target.
-    - If target is categorical: Kruskal-Wallis test
-    - If target is numeric: mutual information (regression)
+    - If target is categorical: Kruskal-Wallis test, with the adjusted eta as effect
+    - If target is numeric: Spearman's rank correlation, with its absolute value as effect
     """
     valid = pd.DataFrame({"feature": feature, "target": target}).dropna()
 
@@ -179,21 +198,21 @@ def test_feature_target_numeric(
         )
 
     if is_target_numeric:
-        # Mutual information for regression
+        # Ranks, not values: a long tail in the target or the column does not decide the effect.
         try:
-            mi = mutual_info_regression(valid[["feature"]].values, valid["target"].values, random_state=42)
+            rho, p = spearmanr(valid["feature"].astype(float), valid["target"].astype(float))
             return FeatureTargetRelationship(
                 feature=feature.name or "unknown",
-                test_statistic=mi[0],
-                p_value=np.nan,
-                test_name="mutual_info",
-                effect_size=float(mi[0]),
+                test_statistic=float(rho),
+                p_value=float(p),
+                test_name="spearman",
+                effect_size=abs(float(rho)),
                 support=len(valid),
             )
         except Exception as e:
-            logger.debug(f"Mutual information failed for {feature.name}: {e}")
+            logger.debug(f"Spearman failed for {feature.name}: {e}")
             return FeatureTargetRelationship(
-                feature=feature.name or "unknown", test_statistic=np.nan, p_value=np.nan, test_name="mutual_info"
+                feature=feature.name or "unknown", test_statistic=np.nan, p_value=np.nan, test_name="spearman"
             )
     else:
         # Kruskal-Wallis for classification (non-parametric ANOVA)
@@ -206,9 +225,9 @@ def test_feature_target_numeric(
                 test_statistic=h_stat,
                 p_value=float(p),
                 test_name="kruskal_wallis",
-                # The correlation ratio, the same 0-to-1 measure the association map uses for a
-                # category against a number, so this column can be read next to Cramér's V.
-                effect_size=float(correlation_ratio(valid["target"], valid["feature"])),
+                # The correlation ratio, the 0-to-1 measure the association map uses for a category
+                # against a number, adjusted for what the classes explain by chance.
+                effect_size=float(adjusted_correlation_ratio(valid["target"].astype(str), valid["feature"])),
                 support=len(valid),
             )
         except Exception as e:
@@ -306,14 +325,13 @@ def analyze_target(
         if pd.api.types.is_numeric_dtype(feature):
             rel = test_feature_target_numeric(feature, target, is_target_numeric)
         else:
-            rel = test_feature_target_categorical(feature, target)
+            rel = test_feature_target_categorical(feature, target, is_target_numeric)
 
         if not np.isnan(rel.p_value) or not np.isnan(rel.test_statistic):
             feature_relationships.append(rel)
 
     # The section answers which features are most related to the target, so it is ranked by how much
-    # each one separates it (Cramér's V or the correlation ratio, both from 0 to 1) and only then by
-    # the p-value. With thousands of rows every p-value collapses to 0 and cannot rank anything: on
+    # each one separates it (the 0-to-1 effects above) and only then by the p-value. With thousands of rows every p-value collapses to 0 and cannot rank anything: on
     # the spaceship data, Spa and RoomService both come back as p = 0 while their effects are 0.22
     # and 0.25.
     feature_relationships.sort(

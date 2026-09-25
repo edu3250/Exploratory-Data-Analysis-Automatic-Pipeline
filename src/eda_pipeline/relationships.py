@@ -104,6 +104,27 @@ def correlation_ratio(categories: pd.Series, values: pd.Series) -> float:
     return float(eta)
 
 
+def adjusted_correlation_ratio(categories: pd.Series, values: pd.Series) -> float:
+    """
+    Eta with the share a grouping explains by chance taken out, as adjusted R² does for a regression.
+
+    k groups explain about (k - 1) / (n - 1) of any variance by chance alone, so a column with many
+    categories reads high against pure noise: over data/raw, Plant_1's DATE_TIME (2 555 values in a
+    sample of 5 000 rows) gives a plain eta of 0.72 against a shuffled target, and Vistara's
+    product_type (19 values in 40 rows) 0.66. Adjusted, a shuffled target gives 0 at the median. 0
+    when there are as many groups as rows.
+    """
+    valid = pd.DataFrame({"cat": categories, "num": values}).dropna()
+    eta = correlation_ratio(valid["cat"], valid["num"])
+    if np.isnan(eta):
+        return np.nan
+    rows, groups = len(valid), valid["cat"].nunique()
+    if rows <= groups:
+        return 0.0
+    adjusted = 1 - (1 - eta**2) * (rows - 1) / (rows - groups)
+    return float(np.sqrt(max(0.0, adjusted)))
+
+
 def compute_numeric_correlations(
     df: pd.DataFrame, numeric_cols: list[str], min_correlation: float = 0.05
 ) -> list[CorrelationPair]:

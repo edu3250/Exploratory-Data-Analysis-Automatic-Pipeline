@@ -903,13 +903,68 @@ class TestTargetFeatureTable:
         assert 0.0 <= tested["edad"].effect_size <= 1.0
         assert tested["edad"].effect_size > tested["gasto"].effect_size  # age is what separates them
 
-    def test_a_regression_target_keeps_mutual_information(self):
-        rng = np.random.default_rng(1)
-        df = pd.DataFrame({"x": rng.normal(0, 1, 300), "ruido": rng.normal(0, 1, 300)})
-        df["precio"] = df["x"] * 1000 + rng.normal(0, 50, 300)
-        rel = self._tested(self._report(df, target_column="precio"))["x"]
-        assert rel.test_name == "mutual_info"
-        assert rel.effect_size > 0
+    @staticmethod
+    def _houses(n: int = 400, seed: int = 2) -> pd.DataFrame:
+        """A price that rises with an area and with a quality grade, plus a street that is almost always paved."""
+        rng = np.random.default_rng(seed)
+        area = rng.normal(1500, 400, n)
+        calidad = rng.choice(["baja", "media", "alta"], n)
+        calle = np.where(np.arange(n) < 2, "Grvl", "Pave")  # one value on 99.5% of the rows
+        precio = 100 * area + pd.Series(calidad).map({"baja": 0, "media": 40_000, "alta": 90_000}).to_numpy()
+        return pd.DataFrame(
+            {
+                "area": area,
+                "calidad": calidad,
+                "calle": calle,
+                "barrio": [f"b{i % 100}" for i in range(n)],  # 100 neighbourhoods, unrelated to the price
+                "precio": precio + rng.normal(0, 20_000, n),
+            }
+        )
+
+    def test_a_regression_target_ranks_numbers_by_spearman(self):
+        rel = self._tested(self._report(self._houses(), target_column="precio"))["area"]
+        assert rel.test_name == "spearman"
+        assert 0.5 < rel.effect_size <= 1.0
+        assert rel.p_value < 0.01
+
+    def test_a_regression_target_compares_categories_by_eta(self):
+        rel = self._tested(self._report(self._houses(), target_column="precio"))["calidad"]
+        assert rel.test_name == "kruskal_wallis"
+        assert 0.3 < rel.effect_size <= 1.0
+        assert rel.p_value < 0.01
+
+    def test_no_chi_square_against_a_continuous_target(self):
+        """Housing: chi² crossed each category with each distinct price, and every effect came out 0.69-0.81."""
+        report = self._report(self._houses(), target_column="precio")
+        assert {rel.test_name for rel in report.feature_relationships} == {"spearman", "kruskal_wallis"}
+
+    def test_a_near_constant_column_does_not_rank_near_the_top(self):
+        """Street, one value on 99.6% of the houses, ranked third with an effect of 0.780."""
+        ranked = [rel.feature for rel in self._report(self._houses(), target_column="precio").feature_relationships]
+        assert ranked[:2] == ["area", "calidad"]
+        assert ranked.index("calle") >= 2
+
+    def test_a_shuffled_target_relates_to_nothing(self):
+        """No measure may find a relationship where there is none, however many categories a column has."""
+        df = self._houses()
+        df["precio"] = np.random.default_rng(3).permutation(df["precio"].to_numpy())
+        report = self._report(df, target_column="precio")
+        assert max(rel.effect_size for rel in report.feature_relationships) < 0.15
+
+    def test_a_shuffled_class_target_relates_to_nothing(self):
+        """150 categories over 300 rows: the uncorrected Cramér's V reads about 0.7 against pure noise."""
+        rng = np.random.default_rng(4)
+        syllables = ["ka", "lo", "mi", "nu", "pe", "ra", "si", "tu", "ve", "zo", "ba", "de", "fi", "go"]
+        words = [a + b for a in syllables for b in syllables][:150]  # codes like "C12" would be identifiers
+        df = pd.DataFrame(
+            {
+                "cabina": [words[i % 150] for i in range(300)],
+                "edad": rng.normal(40, 12, 300),
+                "objetivo": rng.permutation(np.arange(300) % 2 == 0),
+            }
+        )
+        report = self._report(df)
+        assert max(rel.effect_size for rel in report.feature_relationships) < 0.15
 
     def test_without_the_types_every_column_is_still_tested(self):
         """The types are optional: callers that do not pass them keep the old behaviour."""
@@ -1211,6 +1266,31 @@ class TestRelationships:
         )
         eta = correlation_ratio(cat, num)
         assert eta > 0.5  # Should be highly associated
+
+    def test_adjusted_eta_takes_out_what_a_grouping_explains_by_chance(self):
+        # k groups explain (k - 1) / (n - 1) of any variance by chance: 100 groups over 400 rows give a
+        # plain eta near 0.5 against pure noise.
+        from eda_pipeline.relationships import adjusted_correlation_ratio
+
+        rng = np.random.default_rng(5)
+        groups = pd.Series([f"g{i % 100}" for i in range(400)])
+        draws = [pd.Series(rng.normal(size=400)) for _ in range(20)]
+        # One draw of noise can still leave some (up to 0.26 in these 20); on average almost nothing is left.
+        assert np.mean([correlation_ratio(groups, noise) for noise in draws]) > 0.45
+        assert np.mean([adjusted_correlation_ratio(groups, noise) for noise in draws]) < 0.1
+
+    def test_adjusted_eta_leaves_a_real_difference_almost_untouched(self):
+        from eda_pipeline.relationships import adjusted_correlation_ratio
+
+        rng = np.random.default_rng(6)
+        cat = pd.Series(np.repeat(["A", "B", "C"], 100))
+        num = pd.Series(np.concatenate([rng.normal(0, 1, 100), rng.normal(2, 1, 100), rng.normal(4, 1, 100)]))
+        assert adjusted_correlation_ratio(cat, num) == pytest.approx(correlation_ratio(cat, num), abs=0.01)
+
+    def test_adjusted_eta_with_a_group_per_row_is_zero(self):
+        from eda_pipeline.relationships import adjusted_correlation_ratio
+
+        assert adjusted_correlation_ratio(pd.Series(list("abcdef")), pd.Series([1.0, 5, 2, 8, 3, 9])) == 0.0
 
 
 class TestLogScale:

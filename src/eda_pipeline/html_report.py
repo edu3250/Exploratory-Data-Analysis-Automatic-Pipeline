@@ -732,6 +732,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if target_analysis.feature_relationships %}
         <h3>Columns Most Related to the Target</h3>
+        <p>Ranked by the effect, which runs from 0 (unrelated) to 1 whatever the test.
+        {% if target_analysis.target_type == "classification" %}For a class target: eta for numeric columns
+           (Kruskal-Wallis p-value) and Cramér's V for categorical ones (chi²).
+        {% else %}For a numeric target: |Spearman| for numeric columns and eta for categorical ones
+           (Kruskal-Wallis p-value).{% endif %}
+           Eta and Cramér's V are corrected for what many categories explain by chance alone.</p>
         <table>
             <thead>
                 <tr><th>Column</th><th>Test</th><th>P-value</th><th>Effect</th></tr>
