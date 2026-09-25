@@ -1238,10 +1238,17 @@ class TestMulticollinearitySection:
         assert 'href="#multicolinealidad"' in html
         assert "living_area = first_floor + second_floor" in html[block:]
         assert "The 3 columns of those combinations have an infinite VIF" in html[block:]
+        # One column is enough: the user read "any one breaks it" as "drop the three parts".
+        assert "Dropping one of these 3 columns, any one, removes it" in html[block:]
+        assert "recomputed from the other 2" in html[block:]
+        assert "VIF after these drops" in html[block:]
+        assert "every one of the 3 columns left has a VIF under 5" in html[block:]
 
         section = summary["multicollinearity"]
         assert [dep["equation"] for dep in section["exact_dependencies"]] == ["living_area = first_floor + second_floor"]
         assert section["suggested_drops"][0]["column"] == "living_area"
+        assert list(section["vif_after_drops"]) == ["first_floor", "second_floor", "rooms"]
+        assert all(value < 5 for value in section["vif_after_drops"].values())
         vif = summary["relationships"]["multicollinearity_vif"]
         assert vif["living_area"] is None  # infinite: JSON has no such number
         assert all(value is None or value >= 1 for value in vif.values())
@@ -1254,6 +1261,40 @@ class TestMulticollinearitySection:
 
         assert "No column has a VIF of 5 or more" in html
         assert summary["multicollinearity"]["exact_dependencies"] == []
+        assert "VIF after these drops" not in html  # nothing to drop
+        assert summary["multicollinearity"]["vif_after_drops"] == {}
+
+    def test_a_column_the_identity_hid_shows_its_vif_after_the_drops(self, tmp_output_dir):
+        rng = np.random.default_rng(15)
+        first = rng.normal(1000, 300, 400).round(1)
+        second = (0.9 * first + rng.normal(0, 120, 400)).round(1)
+        df = pd.DataFrame(
+            {
+                "first_floor": first,
+                "second_floor": second,
+                "living_area": (first + second).round(1),
+                "rooms": rng.normal(size=400),
+            }
+        )
+
+        html, summary = self._run(tmp_output_dir, df, "pisos")
+
+        after = html[html.index("<h4>VIF after these drops</h4>") :]
+        after = after[: after.index("</table>")]
+        value = summary["multicollinearity"]["vif_after_drops"]["first_floor"]
+        assert 5 <= value < 10
+        assert "first_floor" in after and f"{value:.2f}" in after
+
+    def test_a_single_column_left_is_said_in_words(self, tmp_output_dir):
+        # Vistara's Dates: month_id is dropped, and one column is left with nothing to compare it to.
+        celsius = np.random.default_rng(17).normal(20, 5, 200).round(2)
+        df = pd.DataFrame({"celsius": celsius, "fahrenheit": (1.8 * celsius + 32).round(3)})
+
+        html, summary = self._run(tmp_output_dir, df, "temperaturas")
+
+        assert "recomputed from the other one" in html
+        assert "After them a single column is left" in html
+        assert len(summary["multicollinearity"]["vif_after_drops"]) == 1
 
 
 class TestTransformSection:

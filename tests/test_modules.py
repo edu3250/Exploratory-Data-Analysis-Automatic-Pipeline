@@ -2300,6 +2300,38 @@ class TestMulticollinearity:
         assert report.columns == ["a", "b", "c"]
         assert all(1.0 <= value < 1.1 for value in report.vif.values())
         assert report.exact_dependencies == [] and report.suggested_drops == []
+        assert report.vif_after_drops == {}  # nothing dropped, nothing to measure again
+
+    def test_the_vif_left_after_the_suggested_drops_is_measured(self):
+        """Housing with SalePrice as target: 1stFlrSF read ∞ in its identity, and keeps 6.68 once the totals go."""
+        rng = np.random.default_rng(15)
+        first = rng.normal(1000, 300, 400)
+        second = 0.9 * first + rng.normal(0, 120, 400)  # tied to first, but not exactly
+        df = pd.DataFrame(
+            {"first_floor": first, "second_floor": second, "living_area": first + second, "rooms": rng.normal(size=400)}
+        )
+
+        report = self._analyze(df)
+
+        assert [drop.column for drop in report.suggested_drops] == ["living_area"]
+        assert report.vif["first_floor"] == float("inf")
+        after = report.vif_after_drops
+        assert list(after) == ["first_floor", "second_floor", "rooms"]  # the data's order, drops left out
+        assert 5 <= after["first_floor"] < HIGH_VIF
+        assert after["rooms"] < 1.1
+        [(name, value), (other, _)] = report.ranked_after_drops()
+        assert {name, other} == {"first_floor", "second_floor"} and value == after[name]
+        assert report.partners_after_drops[name] == [other]
+
+    def test_the_vif_after_the_drops_reaches_the_summary(self):
+        rng = np.random.default_rng(16)
+        a, b = rng.normal(size=300), rng.normal(size=300)
+        df = pd.DataFrame({"a": a, "b": b, "total": a + b})
+
+        summary = json.loads(json.dumps(self._analyze(df).to_summary(), allow_nan=False))
+
+        assert set(summary["vif_after_drops"]) == {"a", "b"}
+        assert all(1 <= value < 1.2 for value in summary["vif_after_drops"].values())
 
     def test_a_total_and_its_parts_are_an_exact_identity(self):
         rng = np.random.default_rng(1)
