@@ -12,7 +12,9 @@ Two measurements, both over the rows that have a value in every column analysed:
   singular matrix used to give.
 
 Then a list of columns to consider dropping: the column each identity writes out, followed by the
-column with the highest VIF, recomputed after every drop, until every VIF left is under HIGH_VIF.
+column with the highest VIF, recomputed after every drop, until every VIF left is under HIGH_VIF. The
+VIF the remaining columns have once those are gone is kept too: a column inside an exact combination
+reads infinite until then, and this is the value it really keeps.
 """
 
 import logging
@@ -122,6 +124,10 @@ class MulticollinearityReport:
     partners: dict[str, list[str]] = field(default_factory=dict)
     exact_dependencies: list[ExactDependency] = field(default_factory=list)
     suggested_drops: list[DropSuggestion] = field(default_factory=list)
+    # The columns left after the suggested drops, with the VIF they keep among themselves; empty when
+    # nothing is dropped.
+    vif_after_drops: dict[str, float] = field(default_factory=dict)
+    partners_after_drops: dict[str, list[str]] = field(default_factory=dict)
     chance_r_squared: float = 0.0
     target_left_out: Optional[str] = None
     note: str = ""  # why nothing was measured, when nothing was
@@ -133,6 +139,11 @@ class MulticollinearityReport:
             for name, value in self.vif.items()
             if value >= minimum and (include_exact or not math.isinf(value))
         ]
+        return sorted(listed, key=lambda item: -item[1])
+
+    def ranked_after_drops(self, minimum: float = SHOWN_VIF) -> list[tuple[str, float]]:
+        """Columns left after the suggested drops with a VIF of at least ``minimum``, highest first."""
+        listed = [(name, value) for name, value in self.vif_after_drops.items() if value >= minimum]
         return sorted(listed, key=lambda item: -item[1])
 
     @property
@@ -169,6 +180,7 @@ class MulticollinearityReport:
                 {"column": drop.column, "vif": finite(drop.vif), "exact": drop.exact, "partners": drop.partners}
                 for drop in self.suggested_drops
             ],
+            "vif_after_drops": {name: finite(value) for name, value in self.vif_after_drops.items()},
             "note": self.note,
         }
 
@@ -352,6 +364,8 @@ def analyze_multicollinearity(
         drops.append(DropSuggestion(worst, step_vif[worst], step_partners[worst]))
         current.remove(worst)
     report.suggested_drops = drops
+    if drops:
+        report.vif_after_drops, report.partners_after_drops = _vif(correlation, columns, current)
 
     logger.info(
         f"Multicollinearity: {len(dependencies)} exact combination(s), "

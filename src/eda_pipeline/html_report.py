@@ -804,11 +804,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <h4>Exact combinations ({{ mc.exact_dependencies | length }})</h4>
         <ul class="mc-list">
             {% for dependency in mc.exact_dependencies %}
+            {% set others = (dependency.columns | length) - 1 %}
             <li><code>{{ dependency.equation() | e }}</code> holds on
                 {% if dependency.rows == dependency.rows_checked %}all {{ dependency.rows }}{% else %}{{ dependency.rows }} of the {{ dependency.rows_checked }}{% endif %}
-                rows that have these columns. Dropping any one of these {{ dependency.columns | length }} columns breaks it.</li>
+                rows that have these columns. Dropping one of these {{ dependency.columns | length }} columns, any one, removes it,
+                and nothing is lost: the dropped column can be recomputed from the other {% if others == 1 %}one{% else %}{{ others }}{% endif %}.</li>
             {% endfor %}
         </ul>
+        <p>Which one you drop changes what is left. Dropping a column that is almost always 0 removes the
+           exact combination but leaves the others nearly as tied as before. The drops suggested below, and
+           the VIF they leave, are measured.</p>
         {% endif %}
 
         {% set ranked = mc.ranked(include_exact=False) %}
@@ -852,6 +857,38 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 {% if drop.exact %}an exact combination of {{ drop.partners | join(", ") | e }}{% else %}VIF {{ format_vif(drop.vif) }}, explained mostly by {{ drop.partners | join(", ") | e }}{% endif %}</li>
             {% endfor %}
         </ol>
+
+        {% set after = mc.ranked_after_drops() %}
+        {% set left = mc.vif_after_drops | length %}
+        <h4>VIF after these drops</h4>
+        <p>Measured again on the {{ left }} column{% if left != 1 %}s{% endif %} left. A column that read ∞ inside an
+           exact combination shows here the VIF it really keeps.</p>
+        {% if after %}
+        <table>
+            <thead>
+                <tr><th>Column</th><th>VIF</th><th>Explained mostly by</th></tr>
+            </thead>
+            <tbody>
+                {% for name, value in after %}
+                <tr>
+                    <td>{{ name | e }}</td>
+                    <td>{{ format_vif(value) }}</td>
+                    <td>{{ mc.partners_after_drops.get(name, []) | join(", ") | e }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% set rest_after = left - (after | length) %}
+        {% if rest_after == 1 %}
+        <p>The other column has a VIF under {{ "%g" | format(shown_vif) }}.</p>
+        {% elif rest_after %}
+        <p>The other {{ rest_after }} columns have a VIF under {{ "%g" | format(shown_vif) }}.</p>
+        {% endif %}
+        {% elif left == 1 %}
+        <p class="no-data">After them a single column is left, so nothing is left to explain it.</p>
+        {% else %}
+        <p class="no-data">After them, every one of the {{ left }} columns left has a VIF under {{ "%g" | format(shown_vif) }}.</p>
+        {% endif %}
         {% endif %}
         {% endif %}
         {% endif %}
