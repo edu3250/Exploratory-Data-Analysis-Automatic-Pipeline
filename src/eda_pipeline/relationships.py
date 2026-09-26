@@ -239,18 +239,26 @@ def association_matrix(
     return matrix
 
 
+# Each cell of the matrix uses the rows where both of its columns have a value, as the Pearson table
+# and the association map do, and needs as many of them as pearson_correlation does. The matrix used
+# to keep only the rows complete in every numeric column: 13 of the 31 files under data/raw kept 77%
+# to 92% of their rows, so the scatter titles, which come from the matrix, disagreed with the table
+# (Housing: GarageCars-GarageArea 0.839 over 1 121 rows against 0.882 over all 1 460), and one
+# column with almost no values emptied the whole matrix. Pair by pair, the matrix matches the table
+# to 1e-13; the redundant pairs of the plan (|r| >= 0.95) stay the same in every file, and at most 2
+# of the 10 scatter pairs change.
+MIN_PAIR_ROWS = 3
+
+
 def compute_correlation_matrix(df: pd.DataFrame, numeric_cols: list[str]) -> pd.DataFrame:
-    """
-    Compute numeric correlation matrix.
-    """
+    """Pearson correlation of every pair of numeric columns, each over the rows that pair has."""
     if not numeric_cols:
         return pd.DataFrame()
 
-    df_numeric = df[numeric_cols].dropna(how="any")
-    if len(df_numeric) < 2:
+    matrix = df[numeric_cols].astype(float).corr(method="pearson", min_periods=MIN_PAIR_ROWS)
+    if matrix.isna().all().all():
         return pd.DataFrame()
-
-    return df_numeric.corr(method="pearson")
+    return matrix
 
 
 @dataclass

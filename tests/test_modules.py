@@ -1287,6 +1287,45 @@ class TestRelationships:
         num = pd.Series(np.concatenate([rng.normal(0, 1, 100), rng.normal(2, 1, 100), rng.normal(4, 1, 100)]))
         assert adjusted_correlation_ratio(cat, num) == pytest.approx(correlation_ratio(cat, num), abs=0.01)
 
+    @staticmethod
+    def _gappy(n: int = 400, seed: int = 7) -> pd.DataFrame:
+        """Two complete columns and one with a gap on a quarter of the rows, chosen to bias the rest."""
+        rng = np.random.default_rng(seed)
+        a = rng.normal(size=n)
+        b = a + rng.normal(scale=0.8, size=n)
+        c = rng.normal(size=n)
+        c[a > 0.7] = np.nan  # the gaps fall on the rows with the highest a
+        return pd.DataFrame({"a": a, "b": b, "c": c})
+
+    def test_the_matrix_uses_every_row_a_pair_has(self):
+        """Housing: GarageCars-GarageArea read 0.84 over the 1 121 complete rows, and 0.882 over all 1 460."""
+        from eda_pipeline.relationships import compute_correlation_matrix
+
+        df = self._gappy()
+        matrix = compute_correlation_matrix(df, ["a", "b", "c"])
+        assert matrix.loc["a", "b"] == pytest.approx(df["a"].corr(df["b"]), abs=1e-12)
+        assert matrix.loc["a", "c"] == pytest.approx(df["a"].corr(df["c"]), abs=1e-12)
+
+    def test_the_matrix_agrees_with_the_pearson_table(self):
+        """The scatter titles come from the matrix, the table from each pair: they must read the same."""
+        from eda_pipeline.relationships import compute_correlation_matrix, compute_numeric_correlations
+
+        df = self._gappy()
+        matrix = compute_correlation_matrix(df, ["a", "b", "c"])
+        for pair in compute_numeric_correlations(df, ["a", "b", "c"], min_correlation=0.0):
+            assert matrix.loc[pair.var1, pair.var2] == pytest.approx(pair.correlation, abs=1e-12)
+
+    def test_an_almost_empty_column_does_not_empty_the_matrix(self):
+        """On complete rows, one column with two values left no row at all, and the heatmap vanished."""
+        from eda_pipeline.relationships import compute_correlation_matrix
+
+        df = self._gappy()
+        df["casi_vacia"] = np.nan
+        df.loc[df.index[:2], "casi_vacia"] = [1.0, 2.0]
+        matrix = compute_correlation_matrix(df, ["a", "b", "c", "casi_vacia"])
+        assert matrix.loc["a", "b"] == pytest.approx(df["a"].corr(df["b"]), abs=1e-12)
+        assert np.isnan(matrix.loc["a", "casi_vacia"])  # two shared rows are too few to say anything
+
     def test_adjusted_eta_with_a_group_per_row_is_zero(self):
         from eda_pipeline.relationships import adjusted_correlation_ratio
 

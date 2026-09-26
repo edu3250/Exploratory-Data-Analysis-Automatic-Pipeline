@@ -369,6 +369,26 @@ class TestTargetTable:
         assert "Spearman" in table and "eta" in table  # the effect measures are named above the table
 
 
+class TestCorrelationMatrix:
+    """The correlation matrix reads the same numbers as the Pearson table and the scatter plots."""
+
+    def test_the_report_says_which_rows_each_cell_uses(self, tmp_output_dir):
+        rng = np.random.default_rng(25)
+        a = rng.normal(size=300)
+        c = rng.normal(size=300)
+        c[:80] = np.nan
+        df = pd.DataFrame({"a": a.round(3), "b": (a + rng.normal(scale=0.5, size=300)).round(3), "c": c.round(3)})
+        csv_file = tmp_output_dir / "huecos.csv"
+        df.to_csv(csv_file, index=False)
+
+        result = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir)).run()["huecos"]
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+
+        block = html[html.index("<h3>Correlation Matrix</h3>") :]
+        block = block[: block.index("<img")]
+        assert "each cell uses the rows where both columns have a value" in block
+
+
 class TestColumnTypeOverrides:
     """Bug #13: config.column_types must actually be applied."""
 
