@@ -333,6 +333,42 @@ class TestTargetColumnHandling:
         assert any("columna_inexistente" in a["message"] for a in summary["alerts"])
 
 
+class TestTargetTable:
+    """The «Columns Most Related to the Target» table, read in the report."""
+
+    def test_a_continuous_target_ranks_numbers_and_categories_on_one_scale(self, tmp_output_dir):
+        rng = np.random.default_rng(24)
+        n = 400
+        area = rng.normal(1500, 400, n).round(1)
+        calidad = rng.choice(["baja", "media", "alta"], n)
+        precio = 100 * area + pd.Series(calidad).map({"baja": 0, "media": 40_000, "alta": 90_000}).to_numpy()
+        df = pd.DataFrame(
+            {
+                "area": area,
+                "calidad": calidad,
+                "calle": np.where(np.arange(n) < 2, "Grvl", "Pave"),
+                "precio": (precio + rng.normal(0, 20_000, n)).round(0),
+            }
+        )
+        csv_file = tmp_output_dir / "casas.csv"
+        df.to_csv(csv_file, index=False)
+
+        result = _make_pipeline(
+            input_file=str(csv_file), output_dir=str(tmp_output_dir), target=TargetConfig(target_column="precio")
+        ).run()["casas"]
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+
+        table = html[html.index("Columns Most Related to the Target") :]
+        table = table[: table.index("</table>")]
+        rows = re.findall(r"<tr>\s*<td>(.*?)</td>\s*<td>(.*?)</td>", table, re.S)
+        assert [(name.strip(), test.strip()) for name, test in rows[:2]] == [
+            ("area", "spearman"),
+            ("calidad", "kruskal_wallis"),
+        ]
+        assert "chi2" not in table
+        assert "Spearman" in table and "eta" in table  # the effect measures are named above the table
+
+
 class TestColumnTypeOverrides:
     """Bug #13: config.column_types must actually be applied."""
 
