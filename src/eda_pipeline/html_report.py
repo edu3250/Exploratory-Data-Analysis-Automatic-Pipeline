@@ -13,6 +13,7 @@ from typing import Optional
 import pandas as pd
 from jinja2 import Template
 
+from .chart_columns import CHARTS
 from .multicollinearity import CHANCE_R_SQUARED_WARNING, HIGH_VIF, SHOWN_VIF
 from .recommendations import recommendations_by_step
 from .transforms import FIXED_SKEW, MAX_FLOOR_PCT, MIN_DISTINCT, MIN_QQ_GAIN, MIN_SKEW, describe_attempts
@@ -771,6 +772,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if plots.correlation %}
         <h3>Correlation Matrix</h3>
+        {% if chart_notes.correlation %}
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.correlation | e }}</p>
+        {% endif %}
         <p>Pearson, pair by pair: each cell uses the rows where both columns have a value, the same rows as
            the Pearson table and the scatter plots, so the three read the same numbers.</p>
         <div class="plot-container">
@@ -783,6 +787,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <p>Each cell uses the measure that fits the pair: Pearson between two numbers (-1 to 1, signed),
            Cramér's V between two categories, and the correlation ratio (eta) between a category and a
            number. The last two run from 0 to 1 and carry no sign.</p>
+        {% if chart_notes.association %}
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.association | e }}</p>
+        {% endif %}
         <div class="plot-container">
             <img src="data:image/png;base64,{{ plots.association[0] }}" alt="Association Matrix">
         </div>
@@ -910,6 +917,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if plots.histograms %}
         <h3>Numeric Distributions ({{ plots.histograms | length }})</h3>
+        {% if chart_notes.histograms %}
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.histograms | e }}</p>
+        {% endif %}
         {% if floor_split_columns %}
         <p style="color: #555; margin-top: -8px;">
             Drawn a second time without the value that fills them, beside the whole column:
@@ -939,6 +949,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if plots.boxplots %}
         <h3>Boxplots ({{ plots.boxplots | length }})</h3>
+        {% if chart_notes.boxplots %}
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.boxplots | e }}</p>
+        {% endif %}
         {% if floor_split_columns %}
         <p style="color: #555; margin-top: -8px;">
             Without the value that fills them, beside the whole column:
@@ -961,6 +974,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if transforms and transforms.columns %}
         <h3 id="transformaciones">Skewed Columns, Before and After a Transformation</h3>
+        {% if chart_notes.qq %}
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.qq | e }}</p>
+        {% endif %}
         <p>A normal QQ plot sets a column's values against the values a normal distribution would have in the
            same positions: on the red line, the column is normal, and a tail that bends away from it is longer
            than a normal one. Checked here: the continuous columns with a skew beyond ±{{ "%g" | format(min_skew) }},
@@ -990,6 +1006,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if plots.categorical %}
         <h3>Categorical Distributions ({{ plots.categorical | length }})</h3>
+        {% if chart_notes.categorical %}
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.categorical | e }}</p>
+        {% endif %}
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             {% for img in plots.categorical %}
             <div class="plot-container">
@@ -1016,6 +1035,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if plots.target_categorical %}
         <h3>Target vs Categorical Columns ({{ plots.target_categorical | length }})</h3>
+        {% if chart_notes.target_categorical %}
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.target_categorical | e }}</p>
+        {% endif %}
         <p style="color: #555; margin-top: -8px;">
             Grouped bars of each categorical column against the target
             {% if target_analysis %}<strong>{{ target_analysis.target_column }}</strong>{% endif %}.
@@ -1094,6 +1116,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if plots.time_of_day %}
         <h3>By Hour of the Day ({{ plots.time_of_day | length }})</h3>
+        {% if chart_notes.time_of_day %}
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.time_of_day | e }}</p>
+        {% endif %}
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             {% for img in plots.time_of_day %}
             <div class="plot-container">
@@ -1227,6 +1252,7 @@ def generate_html_report(
     recommendations: Optional[list] = None,
     multicollinearity=None,
     transforms=None,
+    chart_columns=None,
 ) -> str:
     """
     Generate HTML report with embedded base64 images.
@@ -1245,6 +1271,7 @@ def generate_html_report(
         recommendations: The preprocessing plan (``Recommendation`` list), shown as the last section.
         multicollinearity: ``MulticollinearityReport``, shown under the correlation matrices.
         transforms: ``TransformReport``: skewed columns under the boxplots, a skewed target in its section.
+        chart_columns: ``{chart: ChartColumns}``; each capped chart gets a note naming what it left out.
 
     Returns:
         Path to generated HTML file
@@ -1276,6 +1303,11 @@ def generate_html_report(
         "categorical_stats": categorical_stats,
         "multicollinearity": multicollinearity,
         "transforms": transforms,
+        "chart_notes": {
+            key: chosen.note(CHARTS[key][1], CHARTS[key][0])
+            for key, chosen in (chart_columns or {}).items()
+            if chosen.capped
+        },
         "describe_attempts": describe_attempts,
         "min_skew": MIN_SKEW,
         "fixed_skew": FIXED_SKEW,

@@ -389,6 +389,72 @@ class TestCorrelationMatrix:
         assert "each cell uses the rows where both columns have a value" in block
 
 
+class TestCappedCharts:
+    """A chart with a cap says what it left out, and with a target it keeps the target and what relates to it."""
+
+    CAPS = VisualizationConfig(max_histograms=3, max_boxplots=3, max_correlation_heatmap_size=4)
+
+    @staticmethod
+    def _frame(n: int = 300, seed: int = 26) -> pd.DataFrame:
+        """Six unrelated numbers, two that drive the price, and four categories of which only the last matters."""
+        rng = np.random.default_rng(seed)
+        data = {f"n{i}": rng.normal(size=n).round(3) for i in range(6)}
+        data["fuerte_1"] = rng.normal(size=n).round(3)
+        data["fuerte_2"] = rng.normal(size=n).round(3)
+        for i in range(3):
+            data[f"c{i}"] = rng.choice(["uno", "dos", "tres"], n)
+        data["zona"] = rng.choice(["norte", "sur"], n)
+        effect = np.where(data["zona"] == "norte", 3.0, 0.0)
+        data["precio"] = (2 * data["fuerte_1"] + 2 * data["fuerte_2"] + effect + rng.normal(size=n)).round(3)
+        return pd.DataFrame(data)
+
+    def _run(self, tmp_output_dir, name, **config):
+        csv_file = tmp_output_dir / f"{name}.csv"
+        self._frame().to_csv(csv_file, index=False)
+        result = _make_pipeline(
+            input_file=str(csv_file), output_dir=str(tmp_output_dir), visualizations=self.CAPS, **config
+        ).run()[name]
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        return html, summary
+
+    def test_with_a_target_the_capped_charts_keep_it_and_what_relates_to_it(self, tmp_output_dir):
+        html, summary = self._run(tmp_output_dir, "precios", target=TargetConfig(target_column="precio"))
+
+        charts = summary["chart_columns"]
+        assert charts["histograms"]["shown"] == ["fuerte_1", "fuerte_2", "precio"]
+        assert charts["histograms"]["chosen_by"] == "target"
+        assert "precio" in charts["correlation"]["shown"] and "precio" in charts["association"]["shown"]
+        assert "zona" in charts["association"]["shown"]
+        assert "zona" in charts["categorical"]["shown"] and len(charts["categorical"]["shown"]) == 3
+
+        section = html[html.index("<h3>Numeric Distributions") :]
+        section = unescape(section[: section.index("<img")])  # as the browser shows it
+        assert "3 of the 9 numeric columns: precio and the 2 most related to it" in section
+        assert "Left out (6): n0, n1, n2, n3, n4, n5" in section
+        assert "visualizations.max_histograms" in section
+
+    def test_without_a_target_they_keep_the_data_order_and_say_what_is_missing(self, tmp_output_dir):
+        html, summary = self._run(tmp_output_dir, "sin_target")
+
+        assert summary["chart_columns"]["histograms"]["shown"] == ["n0", "n1", "n2"]
+        assert summary["chart_columns"]["histograms"]["chosen_by"] == "order"
+        section = html[html.index("<h3>Numeric Distributions") :]
+        section = unescape(section[: section.index("<img")])  # as the browser shows it
+        assert "the first 3 in the data's order" in section
+        assert "Left out (6): n3, n4, n5, fuerte_1, fuerte_2, precio" in section
+
+    def test_charts_under_their_caps_get_no_note(self, tmp_output_dir):
+        csv_file = tmp_output_dir / "pocas.csv"
+        self._frame().to_csv(csv_file, index=False)
+        result = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir)).run()["pocas"]
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+
+        assert summary["chart_columns"] == {}  # 9 numeric and 4 categorical columns fit the default caps
+        assert "Left out (" not in html
+
+
 class TestColumnTypeOverrides:
     """Bug #13: config.column_types must actually be applied."""
 

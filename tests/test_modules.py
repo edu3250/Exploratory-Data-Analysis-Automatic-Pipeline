@@ -1714,6 +1714,69 @@ class TestHtmlReport:
         ]
 
 
+class TestChartColumns:
+    """Which columns a capped chart shows: the target always, then the ones most related to it."""
+
+    COLUMNS = ["a", "b", "c", "d", "e", "precio"]
+    EFFECTS = {"a": 0.1, "b": 0.7, "c": 0.05, "d": 0.4, "e": 0.3}
+
+    def test_a_list_under_the_cap_is_shown_whole(self):
+        from eda_pipeline.chart_columns import choose_columns
+
+        chosen = choose_columns(self.COLUMNS, 10, "precio", self.EFFECTS)
+        assert chosen.shown == self.COLUMNS and chosen.left_out == [] and not chosen.capped
+
+    def test_without_a_target_the_first_columns_stay_and_the_rest_are_listed(self):
+        from eda_pipeline.chart_columns import choose_columns
+
+        chosen = choose_columns(self.COLUMNS, 4)
+        assert chosen.shown == ["a", "b", "c", "d"]
+        assert chosen.left_out == ["e", "precio"]
+        assert not chosen.by_target
+
+    def test_with_a_target_it_is_always_shown_and_the_rest_go_by_association(self):
+        """Housing: SalePrice, the 37th of 37 numeric columns, was cut from both matrices."""
+        from eda_pipeline.chart_columns import choose_columns
+
+        chosen = choose_columns(self.COLUMNS, 3, "precio", self.EFFECTS)
+        assert chosen.shown == ["b", "d", "precio"]  # the data's order, not the ranking's
+        assert chosen.left_out == ["a", "c", "e"]
+        assert chosen.by_target and chosen.target_shown
+
+    def test_a_target_outside_the_list_leaves_all_the_room_to_the_most_related(self):
+        from eda_pipeline.chart_columns import choose_columns
+
+        chosen = choose_columns(["a", "b", "c", "d", "e"], 2, "clase", self.EFFECTS)
+        assert chosen.shown == ["b", "d"]
+        assert chosen.by_target and not chosen.target_shown
+
+    def test_a_column_without_a_measured_effect_comes_last(self):
+        from eda_pipeline.chart_columns import choose_columns
+
+        chosen = choose_columns(["sin_efecto", "a", "b"], 2, "precio", {"a": 0.1, "b": 0.7})
+        assert chosen.shown == ["a", "b"]
+        assert chosen.left_out == ["sin_efecto"]
+
+    def test_the_note_says_how_many_how_they_were_chosen_and_which_are_missing(self):
+        from eda_pipeline.chart_columns import choose_columns
+
+        by_target = choose_columns(self.COLUMNS, 3, "precio", self.EFFECTS).note("numeric columns", "max_histograms")
+        assert "3 of the 6 numeric columns" in by_target
+        assert "precio and the 2 most related to it" in by_target
+        assert "Left out (3): a, c, e" in by_target
+        assert "visualizations.max_histograms" in by_target
+
+        in_order = choose_columns(self.COLUMNS, 4).note("numeric columns", "max_histograms")
+        assert "the first 4 in the data's order" in in_order
+        assert "Left out (2): e, precio" in in_order
+
+    def test_the_association_matrix_is_built_on_the_columns_given(self):
+        rng = np.random.default_rng(0)
+        df = pd.DataFrame({"x": rng.normal(size=50), "g": ["u", "v"] * 25, "y": rng.normal(size=50)})
+        matrix = association_matrix(df, ["x", "y"], ["g"], columns=["y", "g"])
+        assert list(matrix.columns) == ["y", "g"] and list(matrix.index) == ["y", "g"]
+
+
 class TestAssociationMatrix:
     """The heatmap must cover categorical variables, not only the numeric ones."""
 

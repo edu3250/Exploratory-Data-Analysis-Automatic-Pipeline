@@ -350,6 +350,7 @@ def analyze_target(
         n_samples=len(df),
         n_missing=int(n_missing),
         class_balance=class_balance,
-        feature_relationships=feature_relationships[:20],  # Top 20 features
+        # Every feature: the report shows the first 20, and chart_columns ranks capped charts by all of them.
+        feature_relationships=feature_relationships,
         leakage_alerts=leakage_alerts,
     )
