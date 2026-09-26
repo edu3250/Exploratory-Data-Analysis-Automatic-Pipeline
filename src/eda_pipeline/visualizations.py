@@ -1048,15 +1048,24 @@ def generate_all_visualizations(
     log_scale: dict[str, LogScaleCheck] | None = None,
     floor_split: dict[str, FloorSplitCheck] | None = None,
     transforms: TransformReport | None = None,
+    chart_columns: dict | None = None,
 ) -> dict[str, list[str]]:
     """
     Generate all standard visualizations.
+
+    ``chart_columns`` (see chart_columns.choose_chart_columns) says which columns each capped chart
+    draws; without it, each takes its first columns up to its cap.
 
     Returns:
         Dictionary mapping plot type to list of generated file paths
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_files = {}
+
+    def columns_for(key: str, columns: list, limit: int) -> list:
+        if chart_columns and key in chart_columns:
+            return chart_columns[key].shown
+        return list(columns)[:limit]
 
     # Numeric columns: histograms and boxplots
     # Columns rule D puts on a log scale get it next to the linear chart, never instead of it
@@ -1066,7 +1075,7 @@ def generate_all_visualizations(
 
     logger.info(f"Generating {len(numeric_cols)} histograms...")
     hist_files = []
-    for col in numeric_cols[: config_viz.max_histograms]:
+    for col in columns_for("histograms", numeric_cols, config_viz.max_histograms):
         output_file = output_dir / f"histogram_{col.replace('/', '_')}.png"
         if plot_histogram(df[col], output_file, log_scale=col in log_cols, floor_split=splits.get(col)):
             hist_files.append(str(output_file))
@@ -1074,7 +1083,7 @@ def generate_all_visualizations(
 
     logger.info(f"Generating {len(numeric_cols)} boxplots...")
     box_files = []
-    for col in numeric_cols[: config_viz.max_boxplots]:
+    for col in columns_for("boxplots", numeric_cols, config_viz.max_boxplots):
         output_file = output_dir / f"boxplot_{col.replace('/', '_')}.png"
         if plot_boxplot(df[col], output_file, log_scale=col in log_cols, floor_split=splits.get(col)):
             box_files.append(str(output_file))
@@ -1082,9 +1091,10 @@ def generate_all_visualizations(
 
     # Skewed columns a transformation fixes: the normal QQ plot before it and after it
     qq_files = []
-    for check in (transforms.fixed if transforms else [])[: config_viz.max_histograms]:
-        output_file = output_dir / f"qq_{str(check.column).replace('/', '_')}.png"
-        if plot_qq_transform(df[check.column], check, output_file):
+    fixed = {check.column: check for check in (transforms.fixed if transforms else [])}
+    for column in columns_for("qq", list(fixed), config_viz.max_histograms):
+        output_file = output_dir / f"qq_{str(column).replace('/', '_')}.png"
+        if plot_qq_transform(df[column], fixed[column], output_file):
             qq_files.append(str(output_file))
     plot_files["qq"] = qq_files
 
@@ -1099,7 +1109,8 @@ def generate_all_visualizations(
     # Categorical columns
     logger.info(f"Generating {len(categorical_cols)} bar charts...")
     cat_files = []
-    for col in categorical_cols[: config_viz.max_histograms]:
+    shown_categorical = columns_for("categorical", categorical_cols, config_viz.max_histograms)
+    for col in shown_categorical:
         output_file = output_dir / f"categorical_{col.replace('/', '_')}.png"
         if plot_categorical(df[col], output_file):
             cat_files.append(str(output_file))
@@ -1107,7 +1118,7 @@ def generate_all_visualizations(
 
     # The same columns as pies, in percentages, while they have few enough categories
     pie_files = []
-    for col in categorical_cols[: config_viz.max_histograms]:
+    for col in shown_categorical:
         output_file = output_dir / f"pie_{col.replace('/', '_')}.png"
         if plot_pie_chart(df[col], output_file):
             pie_files.append(str(output_file))
@@ -1118,7 +1129,7 @@ def generate_all_visualizations(
     if target_column and target_type == "classification" and target_column in df.columns:
         features = [col for col in categorical_cols if col != target_column]
         logger.info(f"Generating {len(features)} grouped bar charts against '{target_column}'...")
-        for col in features[: config_viz.max_histograms]:
+        for col in columns_for("target_categorical", features, config_viz.max_histograms):
             output_file = output_dir / f"target_bars_{col.replace('/', '_')}.png"
             if plot_target_vs_categorical(df[col], df[target_column], output_file):
                 target_bar_files.append(str(output_file))
@@ -1127,7 +1138,11 @@ def generate_all_visualizations(
     # Correlation heatmap
     logger.info("Generating correlation heatmap...")
     corr_file = output_dir / "correlation_heatmap.png"
-    if plot_correlation_heatmap(corr_matrix, corr_file, config_viz.max_correlation_heatmap_size):
+    heatmap_matrix = corr_matrix
+    if chart_columns and "correlation" in chart_columns and not corr_matrix.empty:
+        shown = [col for col in chart_columns["correlation"].shown if col in corr_matrix.index]
+        heatmap_matrix = corr_matrix.loc[shown, shown]
+    if plot_correlation_heatmap(heatmap_matrix, corr_file, config_viz.max_correlation_heatmap_size):
         plot_files["correlation"] = [str(corr_file)]
     else:
         plot_files["correlation"] = []
@@ -1182,7 +1197,7 @@ def generate_all_visualizations(
 
     # Times of day: how the rows spread over the 24 hours
     time_files = []
-    for col in (time_cols or [])[: config_viz.max_histograms]:
+    for col in columns_for("time_of_day", time_cols or [], config_viz.max_histograms):
         output_file = output_dir / f"time_of_day_{col.replace('/', '_')}.png"
         if plot_time_of_day(df[col], output_file):
             time_files.append(str(output_file))

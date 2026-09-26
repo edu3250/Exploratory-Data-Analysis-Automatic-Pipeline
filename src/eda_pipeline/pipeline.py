@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from .chart_columns import choose_chart_columns
 from .config import Config
 from .data_loader import discover_batch_files, load_data, replace_missing_placeholders
 from .data_quality import SEVERITY_ORDER, Alert, DataQualityReport, analyze_data_quality
@@ -20,7 +21,7 @@ from .logging_util import generate_correlation_id, setup_logging
 from .multicollinearity import analyze_multicollinearity
 from .outlier_detection import OutlierReport, analyze_outliers
 from .recommendations import build_recommendations
-from .relationships import RelationshipsReport, analyze_relationships
+from .relationships import RelationshipsReport, analyze_relationships, association_matrix
 from .tables import write_result_tables
 from .target_analysis import analyze_target
 from .transforms import analyze_transforms
@@ -535,6 +536,50 @@ class EDAPipeline:
             default=None,
         )
 
+        self.logger.info("Choosing the columns of the capped charts...")
+        target_effects = (
+            {
+                rel.feature: rel.effect_size
+                for rel in target_report.feature_relationships
+                if rel.effect_size is not None and pd.notna(rel.effect_size)
+            }
+            if target_report
+            else None
+        )
+        chart_columns = (
+            self._run_step(
+                "chart_columns",
+                failed_steps,
+                choose_chart_columns,
+                df,
+                numeric_cols,
+                categorical_cols,
+                self.config.visualizations,
+                target_column=target_column,
+                target_type=target_report.target_type if target_report else None,
+                target_effects=target_effects,
+                time_cols=time_cols,
+                transforms=transforms,
+                default={},
+            )
+            or {}
+        )
+        # The association map was built on the first columns in the data's order, before the target
+        # was analysed; it is built again on the columns chosen for it when those differ.
+        association = relationships_report.association_matrix
+        chosen = chart_columns.get("association")
+        if chosen is not None and list(association.columns) != chosen.shown:
+            association = self._run_step(
+                "association_matrix",
+                failed_steps,
+                association_matrix,
+                df,
+                numeric_cols,
+                categorical_cols,
+                columns=chosen.shown,
+                default=association,
+            )
+
         self.logger.info("Choosing the pair plot...")
         pair_plot = self._run_step(
             "pair_plot",
@@ -584,7 +629,7 @@ class EDAPipeline:
                 relationships_report.correlation_matrix,
                 plots_dir,
                 self.config.visualizations,
-                assoc_matrix=relationships_report.association_matrix,
+                assoc_matrix=association,
                 target_column=target_column,
                 target_type=target_report.target_type if target_report else None,
                 time_cols=time_cols,
@@ -592,6 +637,7 @@ class EDAPipeline:
                 log_scale=log_scale,
                 floor_split=floor_split,
                 transforms=transforms,
+                chart_columns=chart_columns,
                 default={},
             )
             or {}
@@ -661,6 +707,7 @@ class EDAPipeline:
             recommendations=recommendations,
             multicollinearity=multicollinearity_report,
             transforms=transforms,
+            chart_columns=chart_columns,
             default=None,
         )
 
@@ -718,6 +765,7 @@ class EDAPipeline:
             "log_scale_columns": {col: asdict(check) for col, check in log_scale.items()},
             "floor_split_columns": {col: asdict(check) for col, check in floor_split.items()},
             "transforms": transforms.to_summary() if transforms else None,
+            "chart_columns": {key: chosen.to_summary() for key, chosen in chart_columns.items() if chosen.capped},
             "recommendations": [asdict(rec) for rec in recommendations],
             "failed_steps": failed_steps,
         }

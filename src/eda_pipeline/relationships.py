@@ -200,6 +200,7 @@ def association_matrix(
     numeric_cols: list[str],
     categorical_cols: list[str],
     max_columns: int = ASSOCIATION_MAX_COLUMNS,
+    columns: Optional[list[str]] = None,
 ) -> pd.DataFrame:
     """
     Square matrix of associations covering numeric and categorical columns alike.
@@ -213,11 +214,15 @@ def association_matrix(
     types happened to be numbered.
 
     Columns keep the order they have in the DataFrame, and the matrix is capped at `max_columns`
-    to bound the pairwise work on very wide datasets.
+    to bound the pairwise work on very wide datasets. ``columns`` picks them instead: the pipeline
+    passes the ones chart_columns chose, the target among them.
     """
     numeric = set(numeric_cols)
     categorical = set(categorical_cols)
-    columns = [col for col in df.columns if col in numeric or col in categorical][:max_columns]
+    if columns is None:
+        columns = [col for col in df.columns if col in numeric or col in categorical][:max_columns]
+    else:
+        columns = [col for col in columns if col in numeric or col in categorical]
     matrix = pd.DataFrame(np.eye(len(columns)), index=columns, columns=columns, dtype=float)
 
     for position, col_a in enumerate(columns):
