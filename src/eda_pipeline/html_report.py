@@ -771,6 +771,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         {% if plots.correlation %}
         <h3>Correlation Matrix</h3>
+        <p>Pearson, pair by pair: each cell uses the rows where both columns have a value, the same rows as
+           the Pearson table and the scatter plots, so the three read the same numbers.</p>
         <div class="plot-container">
             <img src="data:image/png;base64,{{ plots.correlation[0] }}" alt="Correlation Matrix">
         </div>
