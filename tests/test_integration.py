@@ -368,6 +368,10 @@ class TestTargetTable:
         assert "chi2" not in table
         assert "Spearman" in table and "eta" in table  # the effect measures are named above the table
 
+        association = html[html.index("<h3>Association Between Columns") :]
+        association = re.sub(r"\s+", " ", unescape(association[: association.index("<img")]))  # as rendered
+        assert "corrected for what many categories explain by chance" in association
+
 
 class TestCorrelationMatrix:
     """The correlation matrix reads the same numbers as the Pearson table and the scatter plots."""
