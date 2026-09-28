@@ -1562,6 +1562,15 @@ class TestPairPlot:
         assert spec.hue == "especie"
         assert spec.hue_eta > 0.9
 
+    def test_the_colour_is_judged_by_the_adjusted_eta(self):
+        """The same eta as the association map and the target table, so the 0.25 line means one thing."""
+        from eda_pipeline.relationships import adjusted_correlation_ratio
+
+        df, types = self._penguins()
+        spec = choose_pair_plot(df, types)
+        expected = np.mean([adjusted_correlation_ratio(df["especie"], df[col]) for col in spec.columns])
+        assert spec.hue_eta == pytest.approx(expected)
+
     def test_a_group_that_separates_nothing_is_not_used(self):
         df, types = self._penguins()
         df = df.drop(columns="especie")
@@ -1805,12 +1814,55 @@ class TestAssociationMatrix:
         matrix = association_matrix(df, ["edad", "gasto"], ["grupo", "activo"])
         assert matrix.loc["grupo", "activo"] == pytest.approx(cramers_v(df["grupo"], df["activo"]))
 
-    def test_uses_the_correlation_ratio_between_categorical_and_numeric(self):
+    def test_uses_the_adjusted_correlation_ratio_between_categorical_and_numeric(self):
+        from eda_pipeline.relationships import adjusted_correlation_ratio
+
         df = self._frame()
         matrix = association_matrix(df, ["edad", "gasto"], ["grupo", "activo"])
-        expected = correlation_ratio(df["grupo"], df["edad"])
+        expected = adjusted_correlation_ratio(df["grupo"], df["edad"])
         assert matrix.loc["grupo", "edad"] == pytest.approx(expected)
         assert matrix.loc["edad", "grupo"] == pytest.approx(expected)  # symmetric
+
+    @staticmethod
+    def _many_levels(seed: int = 8) -> pd.DataFrame:
+        """18 categories over 50 rows against unrelated numbers, like data_latin1's items_purchased."""
+        rng = np.random.default_rng(seed)
+        return pd.DataFrame({"items": [f"lote {i % 18}" for i in range(50)], "edad": rng.normal(40, 12, 50)})
+
+    def test_many_categories_over_few_rows_do_not_paint_a_relationship(self):
+        """items_purchased x age read 0.58 in the map: 18 groups over 50 rows explain that much by chance."""
+        df = self._many_levels()
+        plain = correlation_ratio(df["items"], df["edad"])
+        cell = association_matrix(df, ["edad"], ["items"]).loc["items", "edad"]
+        assert plain > 0.5
+        assert cell < plain - 0.3
+
+    def test_mixed_pairs_use_the_adjusted_correlation_ratio(self):
+        from eda_pipeline.relationships import adjusted_correlation_ratio, compute_mixed_associations
+
+        df = self._frame()
+        pairs = {
+            (p.var1, p.var2): p.correlation for p in compute_mixed_associations(df, ["grupo"], ["edad", "gasto"], 0.0)
+        }
+        for (cat, num), value in pairs.items():
+            assert value == pytest.approx(adjusted_correlation_ratio(df[cat], df[num]))
+
+    def test_a_column_is_never_paired_with_itself(self):
+        """A discrete number is in both lists, and correlations.csv listed items_purchased x itself at 1.000."""
+        from eda_pipeline.relationships import compute_mixed_associations
+
+        hijos = np.arange(80) % 4
+        df = pd.DataFrame({"hijos": hijos, "gasto": hijos * 10.0 + np.random.default_rng(9).normal(0, 1, 80)})
+        pairs = compute_mixed_associations(df, ["hijos"], ["hijos", "gasto"], 0.0)
+        assert [(p.var1, p.var2) for p in pairs] == [("hijos", "gasto")]
+
+    def test_a_mixed_pair_at_chance_level_leaves_the_table(self):
+        """1 455 of the 7 518 mixed pairs in correlations.csv sat at chance level once adjusted."""
+        from eda_pipeline.relationships import compute_mixed_associations
+
+        df = self._many_levels()
+        assert correlation_ratio(df["items"], df["edad"]) > 0.05  # listed today
+        assert compute_mixed_associations(df, ["items"], ["edad"]) == []
 
     def test_keeps_the_sign_of_pearson_between_numerics(self):
         # Pearson carries a direction; Cramér's V and eta do not, and must never gain a fake one.

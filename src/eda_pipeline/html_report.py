@@ -786,7 +786,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <h3>Association Between Columns (categorical ones included)</h3>
         <p>Each cell uses the measure that fits the pair: Pearson between two numbers (-1 to 1, signed),
            Cramér's V between two categories, and the correlation ratio (eta) between a category and a
-           number. The last two run from 0 to 1 and carry no sign.</p>
+           number. The last two run from 0 to 1, carry no sign, and are corrected for what many
+           categories explain by chance.</p>
         {% if chart_notes.association %}
         <p style="color: #555; margin-top: -8px;">{{ chart_notes.association | e }}</p>
         {% endif %}

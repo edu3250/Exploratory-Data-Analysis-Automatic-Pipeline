@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib import MatplotlibDeprecationWarning
 
-from .relationships import correlation_ratio
+from .relationships import adjusted_correlation_ratio
 from .transforms import LOG1P, TransformCheck, TransformReport, apply_transform, qq_points
 from .type_inference import coerce_to_datetime, parse_time_of_day
 
@@ -866,6 +866,9 @@ PAIR_PLOT_MAX_ROWS = 2000
 # correlation ratio (eta) of at least 0.25, Cohen's medium effect (eta squared about 0.06). Measured
 # over the 19 datasets in data/raw, that colours penguins by species (0.81), stroke by work_type (0.42)
 # and leaves uncoloured the groupings that separate nothing, such as product_line in sales (0.07).
+# The eta is the adjusted one, as everywhere else in the report. With at most PAIR_PLOT_MAX_GROUPS
+# groups of PAIR_PLOT_MIN_GROUP_ROWS rows or more, the adjustment moves a candidate by 0.07 at most
+# over data/raw, and the colour chosen is the same in every file.
 PAIR_PLOT_MIN_HUE_ETA = 0.25
 PAIR_PLOT_MAX_GROUPS = PIE_MAX_CATEGORIES
 PAIR_PLOT_MIN_GROUP_ROWS = 10  # a smaller group shows no pattern and cannot draw a distribution
@@ -912,7 +915,7 @@ def _pair_plot_columns(df: pd.DataFrame, continuous: list[str]) -> list[str]:
 
 
 def _mean_eta(df: pd.DataFrame, group: str, columns: list[str]) -> float | None:
-    etas = [correlation_ratio(df[group], df[col].astype(float)) for col in columns]
+    etas = [adjusted_correlation_ratio(df[group], df[col].astype(float)) for col in columns]
     etas = [float(eta) for eta in etas if pd.notna(eta)]
     return sum(etas) / len(etas) if etas else None
 

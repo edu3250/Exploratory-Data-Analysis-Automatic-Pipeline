@@ -174,7 +174,10 @@ def compute_mixed_associations(
     df: pd.DataFrame, categorical_cols: list[str], numeric_cols: list[str], min_association: float = 0.05
 ) -> list[CorrelationPair]:
     """
-    Compute associations between categorical and numeric columns (correlation ratio).
+    Compute associations between categorical and numeric columns (adjusted correlation ratio).
+
+    Over data/raw, 1 455 of the 7 518 pairs a plain eta kept above min_association sit at chance
+    level once adjusted, and leave the table.
 
     Returns:
         List of CorrelationPair objects with eta > min_association
@@ -183,7 +186,11 @@ def compute_mixed_associations(
 
     for cat_col in categorical_cols:
         for num_col in numeric_cols:
-            eta = correlation_ratio(df[cat_col], df[num_col])
+            # A discrete number sits in both lists; paired with itself it read 1.000 (90 such rows
+            # in the correlations.csv of data/raw).
+            if cat_col == num_col:
+                continue
+            eta = adjusted_correlation_ratio(df[cat_col], df[num_col])
 
             if not np.isnan(eta) and eta > min_association:
                 pairs.append(CorrelationPair(var1=cat_col, var2=num_col, correlation=eta, method="eta"))
@@ -206,7 +213,12 @@ def association_matrix(
     Square matrix of associations covering numeric and categorical columns alike.
 
     Every pair uses the measure that fits it: Pearson between two numbers (signed), Cramér's V
-    between two categories, and the correlation ratio (eta) between a category and a number.
+    between two categories, and the correlation ratio (eta) between a category and a number. V and
+    eta are both corrected for what many categories explain by chance (Bergsma-Wicher, and
+    adjusted_correlation_ratio). Over data/raw, 137 of the 1 318 category-number cells the maps show
+    drop by 0.05 or more with the adjustment, down to 0 for data_latin1's items_purchased (18
+    categories over 50 rows) against age, which read 0.58; a real relationship keeps its value
+    (Vistara's product_type against current_price, 0.93).
 
     Label-encoding the categories and running Pearson over everything, the usual shortcut, invents
     an order the categories do not have: on the stroke dataset it turns the work_type/age
@@ -233,9 +245,9 @@ def association_matrix(
             elif not a_is_numeric and not b_is_numeric:
                 value = cramers_v(df[col_a], df[col_b])
             elif a_is_numeric:
-                value = correlation_ratio(df[col_b], df[col_a])
+                value = adjusted_correlation_ratio(df[col_b], df[col_a])
             else:
-                value = correlation_ratio(df[col_a], df[col_b])
+                value = adjusted_correlation_ratio(df[col_a], df[col_b])
 
             value = 0.0 if value is None or pd.isna(value) else float(value)
             matrix.loc[col_a, col_b] = value
