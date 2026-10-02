@@ -533,15 +533,22 @@ def plot_association_heatmap(assoc_matrix: pd.DataFrame, output_path: Path, max_
     return True
 
 
+MISSING_MATRIX_MAX_ROWS = 500
+
+
 @safe_plot
 def plot_missing_matrix(df: pd.DataFrame, output_path: Path) -> bool:
     """Plot missing value heatmap."""
     if df.empty:
         return False
 
-    # Sample if too large
-    if len(df) > 500:
-        df = df.sample(500, random_state=42)
+    # Above this many rows the chart draws a random sample, and says so on its axis
+    rows = len(df)
+    if rows > MISSING_MATRIX_MAX_ROWS:
+        df = df.sample(MISSING_MATRIX_MAX_ROWS, random_state=42)
+        ylabel = f"Rows (random sample of {MISSING_MATRIX_MAX_ROWS} of {rows})"
+    else:
+        ylabel = f"Rows (all {rows})"
 
     missing_matrix = df.isnull().astype(int)
     fig, ax = plt.subplots(figsize=(14, 8))
@@ -549,7 +556,7 @@ def plot_missing_matrix(df: pd.DataFrame, output_path: Path) -> bool:
         sns.heatmap(missing_matrix, cbar=True, ax=ax, yticklabels=False, cbar_kws={"label": "Missing (1 = yes)"})
     ax.set_title("Missing values")
     ax.set_xlabel("Columns")
-    ax.set_ylabel("Filas (muestra)")
+    ax.set_ylabel(ylabel)
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     return True
