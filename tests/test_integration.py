@@ -393,6 +393,39 @@ class TestCorrelationMatrix:
         assert "each cell uses the rows where both columns have a value" in block
 
 
+class TestMissingValuesSection:
+    """The missing-values block draws its matrix only when there is something missing to draw."""
+
+    @staticmethod
+    def _run(tmp_output_dir, df, name):
+        csv_file = tmp_output_dir / f"{name}.csv"
+        df.to_csv(csv_file, index=False)
+        result = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir)).run()[name]
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+        return html, Path(result["output_dir"]) / "plots" / "missing_matrix.png"
+
+    @staticmethod
+    def _frame(n=120):
+        rng = np.random.default_rng(27)
+        return pd.DataFrame({"a": rng.normal(size=n).round(3), "b": rng.choice(["x", "y", "z"], n)})
+
+    def test_a_table_without_gaps_says_so_in_words(self, tmp_output_dir):
+        html, matrix = self._run(tmp_output_dir, self._frame(), "completa")
+
+        block = html[html.index("<h3>Missing Values</h3>") :]
+        block = block[: block.index("</p>")]
+        assert "No cell is missing" in block
+        assert not matrix.exists()
+
+    def test_a_table_with_gaps_still_draws_its_matrix(self, tmp_output_dir):
+        df = self._frame()
+        df.loc[df.index[:10], "a"] = None
+        html, matrix = self._run(tmp_output_dir, df, "con_huecos")
+
+        assert matrix.exists()
+        assert 'alt="Missing Values Matrix"' in html
+
+
 class TestCappedCharts:
     """A chart with a cap says what it left out, and with a target it keeps the target and what relates to it."""
 

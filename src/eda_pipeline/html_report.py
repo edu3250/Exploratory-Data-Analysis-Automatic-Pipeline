@@ -914,6 +914,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="plot-container">
             <img src="data:image/png;base64,{{ plots.missing[0] }}" alt="Missing Values Matrix">
         </div>
+        {% elif n_rows and missing_total == 0 %}
+        <h3>Missing Values</h3>
+        <p class="no-data">No cell is missing in any of the {{ n_cols }} columns, so there is no matrix to draw.</p>
         {% endif %}
 
         {% if plots.histograms %}
