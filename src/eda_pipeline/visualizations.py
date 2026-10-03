@@ -538,8 +538,14 @@ MISSING_MATRIX_MAX_ROWS = 500
 
 @safe_plot
 def plot_missing_matrix(df: pd.DataFrame, output_path: Path) -> bool:
-    """Plot missing value heatmap."""
-    if df.empty:
+    """
+    Missing-value heatmap, one row per data row and a light cell per gap.
+
+    Nothing is drawn, and False is returned, when no cell is missing: the report says so in words.
+    With every cell at 0 the colour scale used to centre on 0, so 13 of the 24 reports of data/raw
+    showed a gap-free table as one solid red block, with a colour bar from -0.1 to 0.1.
+    """
+    if df.empty or not df.isnull().to_numpy().any():
         return False
 
     # Above this many rows the chart draws a random sample, and says so on its axis
@@ -553,7 +559,16 @@ def plot_missing_matrix(df: pd.DataFrame, output_path: Path) -> bool:
     missing_matrix = df.isnull().astype(int)
     fig, ax = plt.subplots(figsize=(14, 8))
     with _suppress_seaborn_heatmap_warning():
-        sns.heatmap(missing_matrix, cbar=True, ax=ax, yticklabels=False, cbar_kws={"label": "Missing (1 = yes)"})
+        # Fixed from 0 to 1, so present is always the darkest colour and missing the lightest.
+        sns.heatmap(
+            missing_matrix,
+            cbar=True,
+            ax=ax,
+            yticklabels=False,
+            vmin=0,
+            vmax=1,
+            cbar_kws={"label": "Missing (1 = yes)"},
+        )
     ax.set_title("Missing values")
     ax.set_xlabel("Columns")
     ax.set_ylabel(ylabel)

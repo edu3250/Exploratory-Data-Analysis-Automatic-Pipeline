@@ -1901,6 +1901,31 @@ class TestMissingMatrix:
         df = pd.DataFrame({"a": [1.0, None] * 50, "b": [None, 2.0] * 50})
         assert self._ylabel(monkeypatch, df, tmp_output_dir) == "Rows (all 100)"
 
+    def test_a_table_without_gaps_draws_no_matrix(self, tmp_output_dir):
+        """13 of the 24 reports drew one solid red block: with every cell 0, the colours centred on 0."""
+        from eda_pipeline.visualizations import plot_missing_matrix
+
+        output = tmp_output_dir / "missing.png"
+        df = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": ["x", "y", "z"]})
+        assert plot_missing_matrix(df, output) is False
+        assert not output.exists()
+
+    def test_the_colours_always_run_from_present_to_missing(self, monkeypatch, tmp_output_dir):
+        """Present is always the darkest colour and missing the lightest, whatever share is missing."""
+        import eda_pipeline.visualizations as visualizations
+
+        calls = []
+        original = visualizations.sns.heatmap
+
+        def spy(*args, **kwargs):
+            calls.append(kwargs)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(visualizations.sns, "heatmap", spy)
+        df = pd.DataFrame({"a": [None] * 10, "b": [1.0] * 10})  # one column all missing, one complete
+        assert visualizations.plot_missing_matrix(df, tmp_output_dir / "missing.png") is True
+        assert (calls[-1]["vmin"], calls[-1]["vmax"]) == (0, 1)
+
 
 class TestCategoricalPieChart:
     """A pie per categorical column, in percentages, only while its slices can still be told apart."""
