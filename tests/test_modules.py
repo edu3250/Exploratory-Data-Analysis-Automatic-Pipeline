@@ -1872,6 +1872,36 @@ class TestAssociationMatrix:
         assert matrix.loc["a", "g"] >= 0.0
 
 
+class TestMissingMatrix:
+    """The missing-values chart says, in English, which rows it draws."""
+
+    @staticmethod
+    def _ylabel(monkeypatch, df, output_dir) -> str:
+        import matplotlib.axes
+
+        from eda_pipeline.visualizations import plot_missing_matrix
+
+        labels = []
+        original = matplotlib.axes.Axes.set_ylabel
+
+        def spy(self, label, *args, **kwargs):
+            labels.append(label)
+            return original(self, label, *args, **kwargs)
+
+        monkeypatch.setattr(matplotlib.axes.Axes, "set_ylabel", spy)
+        assert plot_missing_matrix(df, output_dir / "missing.png") is True
+        return labels[-1]  # the chart's own label, set after seaborn's
+
+    def test_a_large_table_says_it_draws_a_random_sample(self, monkeypatch, tmp_output_dir):
+        """It read «Filas (muestra)»: Spanish in an English report, and without the sample's size."""
+        df = pd.DataFrame({"a": [1.0, None] * 400, "b": [None, 2.0] * 400})
+        assert self._ylabel(monkeypatch, df, tmp_output_dir) == "Rows (random sample of 500 of 800)"
+
+    def test_a_small_table_draws_every_row(self, monkeypatch, tmp_output_dir):
+        df = pd.DataFrame({"a": [1.0, None] * 50, "b": [None, 2.0] * 50})
+        assert self._ylabel(monkeypatch, df, tmp_output_dir) == "Rows (all 100)"
+
+
 class TestCategoricalPieChart:
     """A pie per categorical column, in percentages, only while its slices can still be told apart."""
 
