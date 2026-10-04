@@ -580,7 +580,7 @@ Verified with real output:
 - **PassengerId**: of the two columns flagged as numbers kept as text over the 24 datasets, one was wrong. `amazon.rating` (1 464 of 1 465 values) is still flagged and nothing new is.
 - **58% of the rows as outliers**: `RoomService` is 0 on 65.5% of the rows, so Q1 was 0 and the fence fell at 2.5 x Q3, flagging 21.9% of the column; across the six numeric columns that was 5 030 of the 8 693 rows. Measured over the 111 numeric columns, 24 have a quartile pinned to a repeated value and only 9 flagged more than 1%: those go from 14-22% to 2-10%, the spaceship rows flagged by IQR go from 5 030 to 1 254, and no other column changes. The 25% floor keeps small pins out (`penguins.flipper_length_mm` equals Q1 at 190 mm on 6.4% of the rows).
 - **The scaler**: keyed on that same share, the correction alone would have sent five zero-inflated columns to a `StandardScaler` carrying the evidence «media y desviación son estables», which is false for a column whose mean is 224 and whose median is 0. Over the same 111 columns the spread ratio separates the two groups with nothing in between (1.23 for the widest below, 3.60 for the narrowest above), and it also stops the old rule picking columns whose mean and standard deviation are fine (`Order_Details.unit_price` and `Returns.refund_amount`, both at a ratio of 1.0).
-- **The target table** led with `PassengerId` at an effect of 1.000, `Name` at 0.999 and `Cabin` at 0.898, all Cramér's V over thousands of categories; `stroke` had `id` among its features. Numeric features took the regression branch because the target was a boolean or 0/1, so they had no p-value, while the same features get Kruskal-Wallis when the target is a string, as in penguins. The corrected tables put the real signal first: `CryoSleep` 0.469 on spaceship (33% of the sleepers were transported against 82% of the rest), `age` 0.245 on stroke, `flipper_length_mm` 0.882 on penguins.
+- **The target table** led with `PassengerId` at an effect of 1.000, `Name` at 0.999 and `Cabin` at 0.898, all Cramér's V over thousands of categories; `stroke` had `id` among its features. Numeric features took the regression branch because the target was a boolean or 0/1, so they had no p-value, while the same features get Kruskal-Wallis when the target is a string, as in penguins. The corrected tables put the real signal first: `CryoSleep` 0.469 on spaceship (82% of the sleepers were transported against 33% of the rest), `age` 0.245 on stroke, `flipper_length_mm` 0.882 on penguins.
 - Reports regenerated on `main` after the merges, all without a failed step: the spaceship report (`reports/spaceship_titanic_20260917_112601`) drops from 3 alerts to 2 and from 5 030 to 1 274 outlier rows, and its feature table is led by `CryoSleep`.
 - Known limit left open on purpose and closed by stage 27: a column that is mostly zeros still had no readable chart.
 
@@ -654,3 +654,211 @@ Verified with real output:
 - **322 tests passed** on `main` after the merge, ruff clean.
 - Left alone on purpose: `license = { text = "MIT" }`. The SPDX form that setuptools 77+ prefers would mean raising the build requirement from `setuptools>=65`, which is a packaging decision of its own.
 - Deferred on purpose: the GitHub Actions workflow. While the repository is private its badge does not render for anonymous visitors, so it buys nothing a reader can see; it is parked until the repository goes public. It would also settle `requires-python = ">=3.10"`, which has never been exercised: the project has only ever run on 3.11.9 with pandas 3.0.5, and the hard-coded badges go stale on the first merge that adds a test. This stage had to correct them by hand: `tests 315 passing` to 322 in three places, and «38 merged PRs» to 43. The coverage claim was re-measured rather than assumed, and it still holds: 92% exactly, 2 655 statements with 217 missed. The «50 defects» figure was left alone, because it is the vault's count through stage 26 and nothing since has been counted rigorously.
+
+## Stage 30: A report named after its folder when the file only names a split
+**Goal**: `analyze-file "data/raw/Kaggle Titanic/train.csv"` produced `reports/train_<timestamp>`, with nothing saying which dataset it was. Kaggle ships `train.csv`, `test.csv` and a sample submission inside a folder whose name is the only thing that identifies them.
+
+**Success Criteria**:
+- When the file's stem only names a split (`train`, `test`, `val`, `valid`, `validation`, `dev`, `holdout`, `submission`, `sample_submission`, `gender_submission`), the folder is prepended: `Kaggle_Titanic_train`, in single-file and batch mode alike, and that name reaches `summary.json` and the report's title.
+- Folders that say where rather than what (`data`, `raw`, `input`, `downloads`…) are not prepended, `data` is not a split, and a folder named like its file is not repeated.
+- The slug the batch folder already used is shared, and collapses repeated underscores.
+
+**Tests** (seen failing first): `tests/test_modules.py::TestDatasetNaming` (7) and `tests/test_integration.py::TestDatasetNamingEndToEnd` (2).
+
+**Status**: COMPLETE. PR #45 was merged on 2026-09-21 as `b92712d`.
+
+Verified with real output:
+- **331 tests passed**, 0 failed, no warnings.
+- Measured over the 31 files of `data/raw` before the rule was written: it renames exactly 3, the Kaggle Titanic files.
+- Known limit, still open: `analyze-batch` does not recurse into subfolders and does not say it skipped them, so `analyze-batch data/raw` misses `Kaggle Titanic/`, `mx/` and the rest.
+
+## Stage 31: Copy the column lists as Python
+**Goal**: To model after reading a report, the user retyped the column names the pipeline had already split into numeric and categorical. He asked for a small button beside each table that copies `num = [...]` and `cat = [...]`, with no tables or files, and said the target is his to pick out.
+
+**Success Criteria**:
+- A «Copy list» button beside Numeric Columns and Categorical Columns copies one Python line with exactly the columns of that table, in its order. The target is not filtered out.
+- The line is written with `json.dumps`, whose literals Python reads back unchanged: a name with quotes, accents or `&` pastes exactly, and a numeric Excel header stays an `int`.
+- The report renders without autoescape, so the line enters the HTML through an explicit `| e`.
+- If the clipboard is blocked, the list appears under the heading, selected, to copy by hand; the button never says «Copied» when it did not copy. It is the report's only script.
+
+**Tests** (seen failing first): `tests/test_modules.py::TestColumnListSnippet` (4) and `tests/test_integration.py::TestCopyColumnLists` (3).
+
+**Status**: COMPLETE. PR #46 was merged on 2026-09-23 as `5af1d8d`.
+
+Verified with real output:
+- **338 tests passed**, 0 failed, no warnings.
+- Clicked in a real browser: the copied text is identical to the embedded one. On Housing Prices `num` (37) and `cat` (43) match their tables in order, with `Id` they cover all 81 columns, and pasted into Python `df[num]` is (1460, 37) and `df[cat]` (1460, 43).
+- PR #47, the user's own change (`notebooks/` ignored, `missingno` in `requirements.txt`), was merged right after and is not a stage.
+- Found on the way and still open: the report renders without autoescape, so a CSV header holding HTML runs when the report opens; and PNG names only replace `/`, so on Windows a column name with `"`, `*`, `?`, `<`, `>` or `|` breaks its chart and one with `:` writes to an NTFS alternate stream.
+
+## Stage 32: Multicollinearity, exact and high
+**Goal**: The user asked whether the pipeline finds multicollinearity, then for the method that works best on any dataset, in a block under the correlation matrices, assuming gaps and feature engineering are already handled. The plan only flagged pairs with |r| ≥ 0.95, and a total resembles none of its parts: in Housing, `TotalBsmtSF = BsmtFinSF1 + BsmtFinSF2 + BsmtUnfSF` holds on all 1 460 rows while the closest pair of those columns has r = 0.820. The VIF in `relationships.py` inverted a matrix that is singular exactly then: about −10¹⁵ on 8 Housing columns, `{}` for every column when one was an exact copy, and it never reached the report.
+
+**Success Criteria**:
+- `multicollinearity.py` finds exact combinations from the null space of the correlation matrix, writes them back as equations in the columns' own units and checks them row by row.
+- Every column gets a VIF: infinite inside an exact combination, never negative or missing.
+- Suggested drops: one per exact combination, then the highest VIF, recomputed after each drop, until every VIF is under 10. Each line names the columns that could go instead.
+- Numeric columns and booleans stored as numbers count, so the dummy trap shows; the target stays out.
+- A «Multicollinearity» block in Charts, under the two matrices and linked from the contents; `summary.json → multicollinearity`, with `null` for an infinite VIF. The old VIF is removed.
+
+**Tests** (seen failing first): `tests/test_modules.py::TestMulticollinearity` (14) and `tests/test_integration.py::TestMulticollinearitySection` (2).
+
+**Status**: COMPLETE. PR #48 was merged on 2026-09-23 as `ca06547`.
+
+Verified with real output:
+- **354 tests passed**, 0 failed, no warnings.
+- Both thresholds were measured over the 214 numeric columns of the 31 files: exact identities sit at 1 − R² ≤ 8.5·10⁻¹⁴ and the closest inexact relation at 6.9·10⁻⁶ (`AC_POWER` against `DC_POWER`), so the cut is 10⁻¹⁰; no column has a VIF between 9.57 and 17.6, so the conventional 10 holds.
+- No false identity in the 31 files. Housing gives its two identities; a Spaceship file with the user's feature engineering gives `TotalSpend` and 4 dummy traps, and without those 5 columns the highest VIF left is 1.68.
+- Reading the rendered block showed the VIF table repeating the 22 columns at ∞ that the identities already explained; it now lists finite VIFs only, and the exact ones go in one line.
+- Cross-checked later on the user's `Housing_mid_1.csv` with statsmodels: the same 8 infinite columns, rank 34 of 36, and the finite VIFs equal to the JSON's rounding.
+- Not run at the time: `ruff format --check`. Stages 28, 30 and 32 ran only `ruff check`, and five files (`cli.py`, `type_inference.py`, `multicollinearity.py`, `test_integration.py`, `test_modules.py`) still wait for a formatting PR. Every stage since checks that it adds no new difference.
+
+## Stage 33: QQ plots before and after the transformation that fixes a skewed column, and a Transform step
+**Goal**: Before implementing, the user asked what a section of QQ plots for columns with a skew far from 0 would add on any dataset. Over the 121 distinct numeric columns of `data/raw`, 57 have |skew| > 1, but 30 of them are a pile of their lowest value (`PoolArea` 99.5% zeros, the Spaceship spending columns around 65%), which no transformation straightens, and 11 have 20 distinct values or fewer, whose QQ plot is a staircase. The question worth a chart is whether a transformation fixes the column. He asked for it with the target included and a Transform step in the plan.
+
+**Success Criteria**:
+- `transforms.py` checks each continuous column with |skew| > 1, more than 20 distinct values and its lowest value on under 25% of the rows. It tries log1p (only without negatives; the easier one to read back), then Yeo-Johnson, and keeps the first that brings the skew within ±0.5 **and** raises the r of the normal QQ plot by at least 0.005.
+- Charts, after the boxplots: the rule, the columns no transformation fixes with what each attempt left, and a before/after QQ plot for each fixed one. A skewed numeric target gets the same plot in its own section.
+- A Transform step between Encode and Scale, with skew and r before and after, and λ for Yeo-Johnson. The target line says to model log1p(target) and turn predictions back with expm1. A transformed column is scaled after the transform.
+- Above 1 000 rows the QQ plot uses 1 000 quantiles. No normality test: with thousands of rows every one of them rejects.
+- `summary.json → transforms`.
+
+**Tests** (seen failing first; the integration ones were also run against `main`'s `src/`): `tests/test_modules.py::TestTransforms` (16), 6 more in `TestPreprocessingRecommendations`, and `tests/test_integration.py::TestTransformSection` (4).
+
+**Status**: COMPLETE. PR #49 was merged on 2026-09-24 as `3244203`.
+
+Verified with real output:
+- **380 tests passed**, 0 failed, no warnings.
+- The r condition came from reading the Housing output: under Yeo-Johnson, `TotalBsmtSF` goes from skew 1.52 to 0.23 while r moves from 0.9750 to 0.9754, because the 37 houses without a basement stay apart. Every other column that reaches ±0.5 gains at least 0.014. Over the corpus, 21 of the 26 candidates are drawn (median r 0.90 → 0.99) and the other 5 are listed; the slowest file takes about half a second.
+- Housing with `SalePrice`: the target goes from skew 1.88 to 0.12 under log1p (r 0.935 → 0.996); `LotArea`, `GrLivArea` and `1stFlrSF` are fixed by log1p, `LotFrontage` by Yeo-Johnson (log1p would leave −0.73).
+- Two old tests changed on purpose: a log-normal column on rule D's log scale now gets log1p in Transform and «StandardScaler, after the transform» instead of log10, and the full plan now includes the transform step. A rule-D column that is not a candidate keeps log10.
+
+## Stage 34: One drop is enough, and the VIF left after the drops
+**Goal**: Reading the Housing report, the user took «Dropping any one of these 4 columns breaks it» to mean dropping the three parts of a total and keeping the total. And a column inside an exact combination reads ∞, which hid what the suggested drops leave behind.
+
+**Success Criteria**:
+- The sentence under each exact combination says one drop, any one, removes it and loses nothing, because the dropped column can be recomputed from the others. A paragraph adds that dropping a column that is almost always 0 leaves the rest nearly as tied.
+- A «VIF after these drops» table under the drop list, shown only when something is dropped; `summary.json → multicollinearity.vif_after_drops`.
+
+**Tests** (seen failing first; the single-column case was written after the code and run against `main` to see it fail): 2 more in `TestMulticollinearity` and 2 more in `TestMulticollinearitySection`.
+
+**Status**: COMPLETE. PR #50 was merged on 2026-09-24 as `d79af4d`.
+
+Verified with real output:
+- **384 tests passed**, 0 failed, no warnings.
+- Housing with `SalePrice` as target: only `YearBuilt` (6.09) used to show above 5. After the drops, `1stFlrSF` 6.68, `BsmtFinSF1` 6.18 and `2ndFlrSF` 5.92 show too.
+- Over `data/raw`, 11 files get suggested drops; `mx/siniestros` shows `valor_ultimo_avaluo` at 9.50 and `numero_creditos` at 8.00, and Vistara's `Dates`, with one column left, says so in words.
+- Measured for the user before the change: dropping `LowQualFinSF` (98% zeros) leaves `GrLivArea` at VIF 176, and the R² of the log price on the basement columns is 0.3812 with all four and with any three.
+
+## Stage 35: The target table picks its test from the target type
+**Goal**: A suggested task, written from the Housing report and verified against the code and `data/raw` before acting, pointed out that with a numeric target the categorical columns went through chi² on a crosstab against every distinct target value. Cramér's V came out inflated (all 20 rows categorical at 0.69–0.81, `Street`, one value on 99.6% of the rows, third at 0.780), and the numeric columns, measured by mutual information on another scale, never reached the top 20.
+
+**Success Criteria**:
+- The test depends on the target type and the column type, and every effect runs from 0 to 1 so one table can rank them together:
+
+  | | Numeric column | Categorical column |
+  |---|---|---|
+  | Numeric target | \|Spearman\| (its p-value) | adjusted eta (Kruskal-Wallis) |
+  | Class target | adjusted eta (Kruskal-Wallis) | Bergsma-corrected Cramér's V (chi²) |
+
+- `relationships.adjusted_correlation_ratio` takes out of eta the share that k groups explain by chance, as adjusted R² does. Never chi² against a continuous target.
+- The report names the effect measures above the table.
+
+**Tests** (seen failing first): 6 in `TestTargetFeatureTable` (one replacing the mutual-information test), 3 in `TestRelationships` and `tests/test_integration.py::TestTargetTable`, among them a shuffled target that must relate to nothing, for both target types.
+
+**Status**: COMPLETE. PR #51 was merged on 2026-09-25 as `df8d52e`.
+
+Verified with real output:
+- **393 tests passed**, 0 failed, no warnings.
+- Measured before the rule: every continuous column of `data/raw` as a numeric target (91) and every column with 2–10 classes as a class target (107), on the real and on a shuffled target. Plain eta also inflates with many categories (`DATE_TIME`, 2 555 values: 0.72 against a shuffled target), which the task had not foreseen and is why eta is adjusted.
+- With a shuffled numeric target, categorical columns went from a median effect of 0.50 (max 1.00) under chi² to 0.00 under adjusted eta. Near-constant columns in a target's top 5 went from 19 of 91 targets to 2, and numeric columns from 38% of the top 5 to 69%. For class targets, the 99th percentile of shuffled effects went from 0.34 to 0.24 (V) and from 0.24 to 0.14 (eta); Spaceship, penguins and stroke keep their ranking.
+- Housing now reads `OverallQual` 0.81, `Neighborhood` 0.73, `GrLivArea` 0.73, `GarageCars` 0.69, `ExterQual` 0.69…, with `Street` out of the top 20. Titanic is unchanged (`Sex` 0.54, `Pclass` 0.34, `Fare` 0.26).
+- The class-target shuffle test first passed by accident: its column of codes («C12») was typed as an identifier and left out of the table. It now uses words, and fails without the fix.
+
+## Stage 36: The correlation matrix, pair by pair
+**Goal**: The same task noted that the scatter titles disagreed with the Pearson table (Housing, `GarageCars`–`GarageArea`: r = 0.84 against 0.882). It guessed two different statistics; it was one statistic on different rows. The matrix, where the scatter plots take their pairs and their r, kept only the rows complete in every numeric column (1 121 of 1 460), while the table and the association map use each pair's own rows.
+
+**Success Criteria**:
+- `compute_correlation_matrix` runs pandas' pairwise Pearson with at least 3 shared rows per cell (`MIN_PAIR_ROWS`), the minimum `pearson_correlation` already asks for.
+- A sentence under the heatmap says which rows each cell uses. The multicollinearity section keeps complete rows, which a VIF needs.
+
+**Tests** (seen failing first): 3 in `TestRelationships` and `tests/test_integration.py::TestCorrelationMatrix`.
+
+**Status**: COMPLETE. PR #52 was merged on 2026-09-25 as `ea474b9`.
+
+Verified with real output:
+- **397 tests passed**, 0 failed, no warnings.
+- 13 of the 31 files lost 8–23% of their rows in the matrix. Pair by pair, the matrix matches the Pearson table to 1e-13 in every file, r moves by up to 0.138 (Housing), the plan's redundant pairs stay the same in every file, and at most 2 of the 10 scatter pairs change.
+- A numeric column with almost no values no longer leaves zero complete rows and an empty matrix.
+- The Housing scatter now reads r = 0.88, as the table does.
+
+## Stage 37: Capped charts keep the target, choose by association, and say what they leave out
+**Goal**: The task's last point. The heatmaps stopped at `max_correlation_heatmap_size` columns and the galleries at `max_histograms` or `max_boxplots`, taking the first columns in the data's order and saying nothing about the rest. In Housing with `SalePrice`, the target (37th of 37 numeric columns) was missing from both matrices, 39 of the 59 categorical columns had no chart, and the association map was built before the target was even analysed.
+
+**Success Criteria**:
+- `chart_columns.py`: with a target, the target always goes in and the other places go to the columns most related to it, by the target table's effect (an unmeasured column goes last); without a target, the first columns in the data's order, as before. The shown columns keep the data's order, and if the target analysis failed the target still goes in.
+- Every capped chart carries a note: how many of how many, how they were chosen, every column left out, and the YAML setting that raises the cap. `summary.json → chart_columns`.
+- It covers both heatmaps, histograms, boxplots, QQ plots, categorical bars and pies, target-vs-categorical bars, and times of day (which keep the data's order, since they are not measured against the target).
+- The association map is rebuilt on its chosen columns, and the target analysis keeps every feature's effect (the table still shows 20).
+
+**Tests** (seen failing first): `tests/test_modules.py::TestChartColumns` (7) and `tests/test_integration.py::TestCappedCharts` (3).
+
+**Status**: COMPLETE. PR #53 was merged on 2026-09-25 as `ef93593`.
+
+Verified with real output:
+- **407 tests passed**, 0 failed, no warnings.
+- Only the Housing files exceed the default caps in `data/raw`. `SalePrice` is now in both matrices and among the histograms, `ExterQual` and `KitchenQual` get bars, and the notes name the 7, 50, 17 and 39 columns left out.
+- `SaleCondition`, which the task counted among the strongest, is 21st of 59 categorical columns (0.364, tied with `SaleType`, which comes first in the data). It is named in the note; the rule was not bent to draw it.
+- One integration test first failed because it compared raw HTML, where the apostrophe of «data's» is `&#39;`; it now compares the text as a browser shows it.
+
+## Stage 38: The adjusted eta everywhere
+**Goal**: After stage 35 three places still used plain eta: the association map's category-number cells, the mixed pairs of `tables/correlations.csv`, and the pair plot's colour. The user asked what would change, it was measured, and he asked for it.
+
+**Success Criteria**:
+- All three use `adjusted_correlation_ratio`, and the map's description says V and eta are corrected for chance.
+- A column is never paired with itself in the mixed pairs.
+
+**Tests** (seen failing first; the self-pair test was also run against `main`): 4 more in `TestAssociationMatrix`, 1 in `TestPairPlot`, and an assertion on the map's description in `TestTargetTable`.
+
+**Status**: COMPLETE. PR #54 was merged on 2026-09-28 as `a2eaaea`.
+
+Verified with real output:
+- **412 tests passed**, 0 failed, no warnings.
+- 137 of the 1 318 category-number cells the maps show drop by 0.05 or more (17 by 0.20 or more): `data_latin1`'s `items_purchased` against `age` (18 categories over 50 rows) goes from 0.58 to 0.00. Against shuffled numbers the cells' 99th percentile goes from 0.34 to 0.19, while a real relationship keeps its value (Vistara's `product_type` against `current_price`, 0.93).
+- 1 455 of the 7 518 mixed pairs sit at chance level once adjusted and leave `correlations.csv`. The pair plot's colour is the same in every file; the largest move among its candidates is 0.07.
+- Reading `data_latin1`'s `correlations.csv` showed `items_purchased` paired with itself at 1.000: a discrete number sits in both the numeric and the categorical list. There were 90 such rows across 17 files.
+- In the reports regenerated afterwards, self-pairs went from 73 to 0 and eta pairs from 5 743 to 4 604.
+
+## Stage 39: The README reviewed, and the missing-values axis
+**Goal**: The user rewrote the README on GitHub (`2465ee0`: three screenshots of the Spaceship report and three sections dropped) and asked for a review and for captions. Reading the screenshots also showed the missing-values matrix labelling its y axis «Filas (muestra)».
+
+**Success Criteria**:
+- Each screenshot gets a caption saying what it shows and how to read it, every figure checked against `data/raw/spaceship_titanic/train.csv`, and a descriptive alt text.
+- The badges, the first caption's path and the report table are brought up to date.
+- The matrix's axis says in English which rows it draws.
+
+**Tests**: 2 in `TestMissingMatrix` for the axis, seen failing first; none for the README.
+
+**Status**: COMPLETE. PRs #55 (`8d322ed`) and #56 (`8fb41b8`) were merged on 2026-10-02.
+
+Verified with real output:
+- Coverage re-measured on `2465ee0` before the badge was touched: **93%** with 412 tests (3 166 statements, 231 missed).
+- The captions' figures: classes at 50.4% / 49.6%; `CryoSleep` at 0.47 against the spending columns at 0.21–0.24; twelve columns missing on 2.1–2.5% of the rows, 24% of the rows with at least one gap and 2.5% with two or more; 82% of the passengers in cryosleep transported against 33% of those awake; 66% of Europa's against 42% of Earth's.
+- The axis reads «Rows (random sample of 500 of 8693)» or «Rows (all N)»; the redrawn Spaceship matrix shows the same rows as the screenshot. **414 tests passed**. PR #56 was built in a worktree while the coverage run used the main tree, so `src/` did not change under the measurement.
+
+## Stage 40: No missing-values matrix for a table without gaps
+**Goal**: Reading the reports regenerated after stage 39: with no missing cell at all, the matrix's colour scale centred on 0 and the chart came out as one solid red block over a colour bar from −0.1 to 0.1, so a complete table looked full of something. It happened in 13 of the 24 reports: every `mx` and Vistara file, and Kaggle's `gender_submission`.
+
+**Success Criteria**:
+- With no gap, no matrix is drawn, and the report says «No cell is missing in any of the N columns, so there is no matrix to draw».
+- With gaps, the colour scale is fixed (`vmin=0, vmax=1`), so present is always the darkest colour and missing the lightest, even when a column is missing on every row.
+
+**Tests**: 2 more in `TestMissingMatrix` and `tests/test_integration.py::TestMissingValuesSection` (2). Three were seen failing first; the fourth guards that a table with gaps still gets its matrix.
+
+**Status**: COMPLETE. PR #57 was merged on 2026-10-03 as `ad40800`.
+
+Verified with real output:
+- **418 tests passed**, 0 failed, no warnings.
+- Vistara's `Products` shows the line and writes no PNG; the Spaceship matrix looks as before.
+- The 24 reports regenerated on `ad40800` have no failed step, and the 13 gap-free ones show the line with no matrix.
+- Opening this stage's PR showed the repository renamed to `Exploratory-Data-Analysis-Automatic-Pipeline`, matching the README's new title. The local remote still uses the old name, which GitHub redirects.
