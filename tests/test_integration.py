@@ -6,6 +6,7 @@ import ast
 import json
 import re
 from html import unescape
+from html.parser import HTMLParser
 from pathlib import Path
 
 import numpy as np
@@ -1536,6 +1537,63 @@ class TestTransformSection:
 
         section = self._block(html)
         assert "a&lt;b" in section and "a<b" not in section
+
+
+class _PageParser(HTMLParser):
+    """The page as a browser builds it: the elements it creates and the text it shows."""
+
+    def __init__(self):
+        super().__init__()
+        self.tags: list[tuple[str, dict]] = []
+        self.text: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.append((tag, dict(attrs)))
+
+    def handle_data(self, data):
+        self.text.append(data)
+
+
+class TestReportEscaping:
+    """Column names and values are text in the report, whatever characters they hold."""
+
+    NAMES = ["<img src=x onerror=alert(1)>", "<script>alert(1)</script>", "R&D <i>gasto</i>", "<s>clase</s>"]
+
+    def test_markup_in_names_and_values_is_shown_as_text(self, tmp_output_dir):
+        rng = np.random.default_rng(31)
+        n = 300
+        base = rng.lognormal(3, 0.9, n)
+        img, script, gasto, clase = self.NAMES
+        df = pd.DataFrame(
+            {
+                img: base.round(2),
+                gasto: (base * 2 + rng.normal(0, 1, n)).round(2),
+                script: rng.choice(["<b>alto</b>", "<b>bajo</b>", "<b>medio</b>"], n, p=[0.6, 0.3, 0.1]),
+                clase: rng.choice(["<u>sí</u>", "<u>no</u>"], n),
+            }
+        )
+        csv_file = tmp_output_dir / "marcas.csv"
+        df.to_csv(csv_file, index=False)
+
+        result = _make_pipeline(
+            input_file=str(csv_file), output_dir=str(tmp_output_dir), target=TargetConfig(target_column=clase)
+        ).run()["marcas"]
+        page = _PageParser()
+        page.feed(Path(result["html_report"]).read_text(encoding="utf-8"))
+        text = "".join(page.text)
+
+        assert result["success"] is True
+        names = {tag for tag, _ in page.tags}
+        assert not names & {"b", "i", "s", "u"}, "a value became an element"
+        assert [tag for tag, _ in page.tags].count("script") == 1  # the report's own, for the copy buttons
+        for tag, attrs in page.tags:
+            assert not [name for name in attrs if name.startswith("on")], f"<{tag}> got an event handler"
+            if tag == "img":
+                assert attrs["src"].startswith("data:image/png;base64,")
+        # Shown exactly as written: escaped once, not twice.
+        for name in self.NAMES:
+            assert name in text, name
+        assert "<b>alto</b>" in text and "<u>sí</u>" in text
 
 
 if __name__ == "__main__":
