@@ -474,9 +474,7 @@ def apply_column_type_overrides(
         n_failed = int(df[col].isna().sum()) - before_na
         if n_failed > 0:
             result.coercion_failures[col] = n_failed
-            logger.warning(
-                f"Column '{col}': {n_failed} value(s) could not be converted to a date (they stayed NaT)."
-            )
+            logger.warning(f"Column '{col}': {n_failed} value(s) could not be converted to a date (they stayed NaT).")
         types[col] = "datetime"
 
     for col in _known(overrides.categorical):

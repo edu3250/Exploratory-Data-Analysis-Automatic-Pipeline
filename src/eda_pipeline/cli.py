@@ -167,9 +167,7 @@ def analyze_file(
 
 @cli.command()
 @click.argument("input_folder", type=click.Path(exists=True, file_okay=False, dir_okay=True))
-@click.option(
-    "--pattern", default=None, help="Glob pattern for the files (default: every supported extension)"
-)
+@click.option("--pattern", default=None, help="Glob pattern for the files (default: every supported extension)")
 @click.option("--config", type=click.Path(exists=True), help="Path to a YAML configuration file")
 @click.option("--output-dir", default=None, help="Where to write the reports (default: reports)")
 @click.option("--target", help="Target column to analyze")
