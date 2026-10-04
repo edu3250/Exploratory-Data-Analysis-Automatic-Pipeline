@@ -8,6 +8,7 @@ import pandas as pd
 
 matplotlib.use("Agg")  # Headless backend
 import logging
+import re
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -55,6 +56,40 @@ def _suppress_seaborn_heatmap_warning():
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=r".*set_bad.*", category=PendingDeprecationWarning)
         yield
+
+
+# Characters Windows refuses in a file name, the two path separators, and control characters. A colon
+# does not even fail: NTFS reads it as a stream name and hides the PNG behind an empty file.
+_UNSAFE_IN_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# The longest label in data/raw has 31 characters. Cutting at 50 keeps even a scatter plot of two long
+# labels under 120 characters, far from the 255 any system allows, and leaves most of the 260 of a
+# Windows path to the folders.
+FILENAME_MAX_LABEL = 50
+
+
+class ChartFiles:
+    """
+    The PNG file of each chart, named after its columns.
+
+    A label goes into the name as text (Excel reads a header such as 2024 as a number), with the
+    characters some system refuses replaced by "_", and cut at FILENAME_MAX_LABEL characters. No two
+    charts share a file: labels that differ only in case (one file on Windows and macOS) or only in
+    the replaced characters get a numbered name, so the second chart does not overwrite the first.
+    """
+
+    def __init__(self, output_dir: Path):
+        self.output_dir = output_dir
+        self._taken: set[str] = set()
+
+    def path(self, kind: str, *labels) -> Path:
+        parts = [_UNSAFE_IN_FILENAME.sub("_", str(label))[:FILENAME_MAX_LABEL] for label in labels]
+        stem = f"{kind}_" + "_vs_".join(parts)
+        name, copy = stem, 1
+        while name.casefold() in self._taken:
+            copy += 1
+            name = f"{stem}_{copy}"
+        self._taken.add(name.casefold())
+        return self.output_dir / f"{name}.png"
 
 
 def safe_plot(func):
@@ -1086,6 +1121,7 @@ def generate_all_visualizations(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_files = {}
+    files = ChartFiles(output_dir)
 
     def columns_for(key: str, columns: list, limit: int) -> list:
         if chart_columns and key in chart_columns:
@@ -1101,7 +1137,7 @@ def generate_all_visualizations(
     logger.info(f"Generating {len(numeric_cols)} histograms...")
     hist_files = []
     for col in columns_for("histograms", numeric_cols, config_viz.max_histograms):
-        output_file = output_dir / f"histogram_{col.replace('/', '_')}.png"
+        output_file = files.path("histogram", col)
         if plot_histogram(df[col], output_file, log_scale=col in log_cols, floor_split=splits.get(col)):
             hist_files.append(str(output_file))
     plot_files["histograms"] = hist_files
@@ -1109,7 +1145,7 @@ def generate_all_visualizations(
     logger.info(f"Generating {len(numeric_cols)} boxplots...")
     box_files = []
     for col in columns_for("boxplots", numeric_cols, config_viz.max_boxplots):
-        output_file = output_dir / f"boxplot_{col.replace('/', '_')}.png"
+        output_file = files.path("boxplot", col)
         if plot_boxplot(df[col], output_file, log_scale=col in log_cols, floor_split=splits.get(col)):
             box_files.append(str(output_file))
     plot_files["boxplots"] = box_files
@@ -1118,13 +1154,13 @@ def generate_all_visualizations(
     qq_files = []
     fixed = {check.column: check for check in (transforms.fixed if transforms else [])}
     for column in columns_for("qq", list(fixed), config_viz.max_histograms):
-        output_file = output_dir / f"qq_{str(column).replace('/', '_')}.png"
+        output_file = files.path("qq", column)
         if plot_qq_transform(df[column], fixed[column], output_file):
             qq_files.append(str(output_file))
     plot_files["qq"] = qq_files
 
     target_check = transforms.target if transforms else None
-    target_qq_file = output_dir / f"qq_{str(target_check.column).replace('/', '_')}.png" if target_check else None
+    target_qq_file = files.path("qq", target_check.column) if target_check else None
     plot_files["qq_target"] = (
         [str(target_qq_file)]
         if target_check and plot_qq_transform(df[target_check.column], target_check, target_qq_file)
@@ -1136,7 +1172,7 @@ def generate_all_visualizations(
     cat_files = []
     shown_categorical = columns_for("categorical", categorical_cols, config_viz.max_histograms)
     for col in shown_categorical:
-        output_file = output_dir / f"categorical_{col.replace('/', '_')}.png"
+        output_file = files.path("categorical", col)
         if plot_categorical(df[col], output_file):
             cat_files.append(str(output_file))
     plot_files["categorical"] = cat_files
@@ -1144,7 +1180,7 @@ def generate_all_visualizations(
     # The same columns as pies, in percentages, while they have few enough categories
     pie_files = []
     for col in shown_categorical:
-        output_file = output_dir / f"pie_{col.replace('/', '_')}.png"
+        output_file = files.path("pie", col)
         if plot_pie_chart(df[col], output_file):
             pie_files.append(str(output_file))
     plot_files["pie"] = pie_files
@@ -1155,7 +1191,7 @@ def generate_all_visualizations(
         features = [col for col in categorical_cols if col != target_column]
         logger.info(f"Generating {len(features)} grouped bar charts against '{target_column}'...")
         for col in columns_for("target_categorical", features, config_viz.max_histograms):
-            output_file = output_dir / f"target_bars_{col.replace('/', '_')}.png"
+            output_file = files.path("target_bars", col)
             if plot_target_vs_categorical(df[col], df[target_column], output_file):
                 target_bar_files.append(str(output_file))
     plot_files["target_categorical"] = target_bar_files
@@ -1196,7 +1232,7 @@ def generate_all_visualizations(
         # The relationships step failed or was skipped; rank the pairs here rather than draw none.
         corr_matrix = df[numeric_cols].astype(float).corr()
     for col1, col2, r in top_correlated_pairs(corr_matrix, config_viz.max_scatter_pairs):
-        output_file = output_dir / f"scatter_{col1.replace('/', '_')}_vs_{col2.replace('/', '_')}.png"
+        output_file = files.path("scatter", col1, col2)
         if plot_scatter(df[col1], df[col2], output_file, r=r, log_x=col1 in log_cols, log_y=col2 in log_cols):
             scatter_files.append(str(output_file))
 
@@ -1215,7 +1251,7 @@ def generate_all_visualizations(
     logger.info(f"Generating {len(datetime_cols)} time series plots...")
     ts_files = []
     for col in datetime_cols[:5]:  # Limit to 5
-        output_file = output_dir / f"timeseries_{col.replace('/', '_')}.png"
+        output_file = files.path("timeseries", col)
         if plot_time_series(df[col], output_file):
             ts_files.append(str(output_file))
     plot_files["timeseries"] = ts_files
@@ -1223,7 +1259,7 @@ def generate_all_visualizations(
     # Times of day: how the rows spread over the 24 hours
     time_files = []
     for col in columns_for("time_of_day", time_cols or [], config_viz.max_histograms):
-        output_file = output_dir / f"time_of_day_{col.replace('/', '_')}.png"
+        output_file = files.path("time_of_day", col)
         if plot_time_of_day(df[col], output_file):
             time_files.append(str(output_file))
     plot_files["time_of_day"] = time_files

@@ -58,11 +58,13 @@ from eda_pipeline.univariate_analysis import (
     analyze_univariate,
 )
 from eda_pipeline.visualizations import (
+    FILENAME_MAX_LABEL,
     PAIR_PLOT_MAX_COLUMNS,
     PAIR_PLOT_MIN_GROUP_ROWS,
     PAIR_PLOT_MIN_HUE_ETA,
     PIE_MAX_CATEGORIES,
     TARGET_BAR_MAX_CLASSES,
+    ChartFiles,
     choose_pair_plot,
     format_share,
     pie_chart_shares,
@@ -1925,6 +1927,38 @@ class TestMissingMatrix:
         df = pd.DataFrame({"a": [None] * 10, "b": [1.0] * 10})  # one column all missing, one complete
         assert visualizations.plot_missing_matrix(df, tmp_output_dir / "missing.png") is True
         assert (calls[-1]["vmin"], calls[-1]["vmax"]) == (0, 1)
+
+
+class TestChartFiles:
+    """One PNG per chart, under a name every system accepts, whatever the column label holds."""
+
+    AWKWARD = ["edad?", "a<b>", 'dice "sí"', "a|b", "a*b", "Unnamed: 0", "a\\b", "tab\there", 2024, 3.5, "x" * 300]
+
+    def test_every_label_gives_a_file_written_under_that_exact_name(self, tmp_output_dir):
+        """On Windows these failed, went to a subfolder, or (the colon) hid the PNG in an NTFS stream."""
+        files = ChartFiles(tmp_output_dir)
+        paths = [files.path("histogram", label) for label in self.AWKWARD]
+
+        for path in paths:
+            assert path.parent == tmp_output_dir
+            assert not set(path.name) & set('<>:"/\\|?*') and path.name.isprintable(), path.name
+            assert len(path.name) <= len("histogram_.png") + FILENAME_MAX_LABEL
+            path.write_bytes(b"png")
+        assert sorted(p.name for p in tmp_output_dir.iterdir()) == sorted(p.name for p in paths)
+
+    def test_labels_that_would_share_a_file_get_one_each(self, tmp_output_dir):
+        """Age and age are one file on Windows and macOS; a/b and a_b were one file everywhere."""
+        files = ChartFiles(tmp_output_dir)
+        labels = ["Age", "age", "AGE", "a/b", "a_b", "a?b", "x" * 60, "x" * 70, "age_2"]
+        names = [files.path("histogram", label).name for label in labels]
+        assert len({name.casefold() for name in names}) == len(labels)
+
+    def test_plain_labels_keep_the_names_they_had(self, tmp_output_dir):
+        files = ChartFiles(tmp_output_dir)
+        assert files.path("histogram", "edad").name == "histogram_edad.png"
+        assert files.path("pie", "edad").name == "pie_edad.png"  # another chart of the same column
+        assert files.path("histogram", "Delta 15 N (o/oo)").name == "histogram_Delta 15 N (o_oo).png"
+        assert files.path("scatter", "edad", "monto").name == "scatter_edad_vs_monto.png"
 
 
 class TestCategoricalPieChart:

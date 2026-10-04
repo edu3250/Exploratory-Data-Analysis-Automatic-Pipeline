@@ -1596,5 +1596,42 @@ class TestReportEscaping:
         assert "<b>alto</b>" in text and "<u>sí</u>" in text
 
 
+class TestChartFileNames:
+    """Every chart reaches the report, whatever its column is called."""
+
+    def test_a_sheet_with_years_as_headers_keeps_its_charts(self, tmp_output_dir):
+        """Excel reads a header such as 2024 as a number, and naming its file from it failed the whole step."""
+        rng = np.random.default_rng(41)
+        xlsx = tmp_output_dir / "ventas.xlsx"
+        pd.DataFrame(
+            {
+                2024: rng.normal(100, 10, 200).round(1),
+                2025: rng.normal(120, 10, 200).round(1),
+                "region": rng.choice(["norte", "sur"], 200),
+            }
+        ).to_excel(xlsx, index=False)
+
+        result = _make_pipeline(input_file=str(xlsx), output_dir=str(tmp_output_dir / "out")).run()["ventas"]
+
+        assert result["failed_steps"] == []
+        plots = {p.name for p in (Path(result["output_dir"]) / "plots").glob("*.png")}
+        assert {"histogram_2024.png", "histogram_2025.png", "categorical_region.png"} <= plots
+
+    def test_awkward_and_clashing_labels_each_get_their_own_chart(self, tmp_output_dir):
+        rng = np.random.default_rng(42)
+        n = 300
+        labels = ["peso?", "Age", "age", "ratio: a/b", 'precio "neto"']
+        df = pd.DataFrame({label: rng.normal(10 * (i + 1), i + 1, n).round(2) for i, label in enumerate(labels)})
+        csv_file = tmp_output_dir / "medidas.csv"
+        df.to_csv(csv_file, index=False)
+
+        result = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir)).run()["medidas"]
+        html = Path(result["html_report"]).read_text(encoding="utf-8")
+
+        histograms = re.findall(r'src="data:image/png;base64,([^"]+)" alt="Histogram"', html)
+        assert len(histograms) == len(labels)
+        assert len(set(histograms)) == len(labels), "two columns share one image"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
