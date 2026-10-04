@@ -51,8 +51,8 @@ def format_p_value(value: object) -> str:
     A p-value for a report cell.
 
     Anything under 0.0001 is shown as "<0.0001": rounding it to 0.0000 reads as certainty, and a
-    p-value that reaches exactly 0 only underflowed. The template escapes what this returns, since
-    it is rendered without autoescaping and a bare < opens a tag.
+    p-value that reaches exactly 0 only underflowed. The template escapes the < like any other
+    value, so it reaches the page as text.
     """
     text = format_measure(value, 4)
     if text == "N/A":
@@ -100,7 +100,9 @@ def encode_plot(plot_path: str) -> str:
     return ""
 
 
-# HTML Template
+# HTML Template. It is rendered with autoescaping on: every value it receives is text (column
+# names, cell values, messages) and reaches the page escaped, so a name or a value that holds
+# markup is shown, not run. All the report's markup is written here; nothing passed in is HTML.
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -527,11 +529,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div style="overflow-x: auto;">
             <table>
                 <thead>
-                    <tr>{% for col in preview_columns %}<th>{{ col | e }}</th>{% endfor %}</tr>
+                    <tr>{% for col in preview_columns %}<th>{{ col }}</th>{% endfor %}</tr>
                 </thead>
                 <tbody>
                     {% for row in preview_rows %}
-                    <tr>{% for cell in row %}<td>{{ cell | e }}</td>{% endfor %}</tr>
+                    <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -548,7 +550,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <button type="button" class="copy-list" data-copy-from="copy-list-num"
                     title="Copy num = [...] with the {{ numeric_stats | length }} numeric column names">📋 Copy list</button>
         </div>
-        <pre class="copy-list-text" id="copy-list-num" hidden>{{ numeric_list | e }}</pre>
+        <pre class="copy-list-text" id="copy-list-num" hidden>{{ numeric_list }}</pre>
         <table>
             <thead>
                 <tr>
@@ -579,7 +581,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <button type="button" class="copy-list" data-copy-from="copy-list-cat"
                     title="Copy cat = [...] with the {{ categorical_stats | length }} categorical column names">📋 Copy list</button>
         </div>
-        <pre class="copy-list-text" id="copy-list-cat" hidden>{{ categorical_list | e }}</pre>
+        <pre class="copy-list-text" id="copy-list-cat" hidden>{{ categorical_list }}</pre>
         <table>
             <thead>
                 <tr><th>Column</th><th>Distinct</th><th>Most common</th><th>Missing</th></tr>
@@ -635,7 +637,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     <td>{{ pair.var1 }}</td>
                     <td>{{ pair.var2 }}</td>
                     <td>{{ "%.3f" | format(pair.correlation) }}</td>
-                    <td>{{ format_p_value(pair.p_value) | e }}</td>
+                    <td>{{ format_p_value(pair.p_value) }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -714,8 +716,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% set skewed_target = transforms.target %}
         <h3>Skew of the Target</h3>
         {% if skewed_target.fixed %}
-        <p><strong>{{ skewed_target.column | e }}</strong> has a skew of {{ "%.2f" | format(skewed_target.skew_before) }}.
-           Modelled as {{ skewed_target.label }}({{ skewed_target.column | e }}), its skew is {{ "%.2f" | format(skewed_target.skew_after) }}
+        <p><strong>{{ skewed_target.column }}</strong> has a skew of {{ "%.2f" | format(skewed_target.skew_before) }}.
+           Modelled as {{ skewed_target.label }}({{ skewed_target.column }}), its skew is {{ "%.2f" | format(skewed_target.skew_after) }}
            and its normal QQ plot straightens (r = {{ "%.3f" | format(skewed_target.qq_r_before) }} → {{ "%.3f" | format(skewed_target.qq_r_after) }}).
            On the raw scale its largest values would dominate the squared errors, whatever the model; the
            Transform step of the Preprocessing Plan says how to turn the predictions back.</p>
@@ -725,7 +727,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
         {% endif %}
         {% else %}
-        <p><strong>{{ skewed_target.column | e }}</strong> has a skew of {{ "%.2f" | format(skewed_target.skew_before) }},
+        <p><strong>{{ skewed_target.column }}</strong> has a skew of {{ "%.2f" | format(skewed_target.skew_before) }},
            and neither transformation both brings it within ±{{ "%g" | format(fixed_skew) }} and straightens its QQ plot:
            {{ describe_attempts(skewed_target) }}.</p>
         {% endif %}
@@ -748,7 +750,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <tr>
                     <td>{{ rel.feature }}</td>
                     <td>{{ rel.test_name }}</td>
-                    <td>{{ format_p_value(rel.p_value) | e }}</td>
+                    <td>{{ format_p_value(rel.p_value) }}</td>
                     <td>{{ format_measure(rel.effect_size, 3) }}</td>
                 </tr>
                 {% endfor %}
@@ -773,7 +775,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% if plots.correlation %}
         <h3>Correlation Matrix</h3>
         {% if chart_notes.correlation %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.correlation | e }}</p>
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.correlation }}</p>
         {% endif %}
         <p>Pearson, pair by pair: each cell uses the rows where both columns have a value, the same rows as
            the Pearson table and the scatter plots, so the three read the same numbers.</p>
@@ -789,7 +791,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
            number. The last two run from 0 to 1, carry no sign, and are corrected for what many
            categories explain by chance.</p>
         {% if chart_notes.association %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.association | e }}</p>
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.association }}</p>
         {% endif %}
         <div class="plot-container">
             <img src="data:image/png;base64,{{ plots.association[0] }}" alt="Association Matrix">
@@ -806,11 +808,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
            do for a model. The matrices above compare columns two at a time; a total and its parts can
            be an exact combination while no pair of them looks alike.</p>
         {% if mc.note %}
-        <p class="no-data">{{ mc.note | e }}</p>
+        <p class="no-data">{{ mc.note }}</p>
         {% else %}
         <p>Computed over the {{ mc.rows_used }} rows that have a value in all {{ mc.columns | length }} columns{% if mc.rows_used < mc.rows_total %}
            ({{ mc.rows_total - mc.rows_used }} rows with a gap in any of them are left out){% endif %}{% if mc.target_left_out %};
-           the target, {{ mc.target_left_out | e }}, is not one of them{% endif %}.</p>
+           the target, {{ mc.target_left_out }}, is not one of them{% endif %}.</p>
         {% if mc.chance_r_squared > chance_warning %}
         <p>With {{ mc.rows_used }} rows for {{ mc.columns | length }} columns, a column would reach an R² of
            about {{ "%.2f" | format(mc.chance_r_squared) }} against the others by chance alone, so part of every VIF below is chance.</p>
@@ -821,7 +823,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <ul class="mc-list">
             {% for dependency in mc.exact_dependencies %}
             {% set others = (dependency.columns | length) - 1 %}
-            <li><code>{{ dependency.equation() | e }}</code> holds on
+            <li><code>{{ dependency.equation() }}</code> holds on
                 {% if dependency.rows == dependency.rows_checked %}all {{ dependency.rows }}{% else %}{{ dependency.rows }} of the {{ dependency.rows_checked }}{% endif %}
                 rows that have these columns. Dropping one of these {{ dependency.columns | length }} columns, any one, removes it,
                 and nothing is lost: the dropped column can be recomputed from the other {% if others == 1 %}one{% else %}{{ others }}{% endif %}.</li>
@@ -846,9 +848,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <tbody>
                 {% for name, value in ranked %}
                 <tr>
-                    <td>{{ name | e }}</td>
+                    <td>{{ name }}</td>
                     <td>{{ format_vif(value) }}</td>
-                    <td>{{ mc.partners.get(name, []) | join(", ") | e }}</td>
+                    <td>{{ mc.partners.get(name, []) | join(", ") }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -869,8 +871,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
            line names the columns that could go instead.</p>
         <ol class="mc-list">
             {% for drop in mc.suggested_drops %}
-            <li><code>{{ drop.column | e }}</code>:
-                {% if drop.exact %}an exact combination of {{ drop.partners | join(", ") | e }}{% else %}VIF {{ format_vif(drop.vif) }}, explained mostly by {{ drop.partners | join(", ") | e }}{% endif %}</li>
+            <li><code>{{ drop.column }}</code>:
+                {% if drop.exact %}an exact combination of {{ drop.partners | join(", ") }}{% else %}VIF {{ format_vif(drop.vif) }}, explained mostly by {{ drop.partners | join(", ") }}{% endif %}</li>
             {% endfor %}
         </ol>
 
@@ -887,9 +889,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <tbody>
                 {% for name, value in after %}
                 <tr>
-                    <td>{{ name | e }}</td>
+                    <td>{{ name }}</td>
                     <td>{{ format_vif(value) }}</td>
-                    <td>{{ mc.partners_after_drops.get(name, []) | join(", ") | e }}</td>
+                    <td>{{ mc.partners_after_drops.get(name, []) | join(", ") }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -922,7 +924,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% if plots.histograms %}
         <h3>Numeric Distributions ({{ plots.histograms | length }})</h3>
         {% if chart_notes.histograms %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.histograms | e }}</p>
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.histograms }}</p>
         {% endif %}
         {% if floor_split_columns %}
         <p style="color: #555; margin-top: -8px;">
@@ -954,7 +956,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% if plots.boxplots %}
         <h3>Boxplots ({{ plots.boxplots | length }})</h3>
         {% if chart_notes.boxplots %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.boxplots | e }}</p>
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.boxplots }}</p>
         {% endif %}
         {% if floor_split_columns %}
         <p style="color: #555; margin-top: -8px;">
@@ -979,7 +981,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% if transforms and transforms.columns %}
         <h3 id="transformaciones">Skewed Columns, Before and After a Transformation</h3>
         {% if chart_notes.qq %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.qq | e }}</p>
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.qq }}</p>
         {% endif %}
         <p>A normal QQ plot sets a column's values against the values a normal distribution would have in the
            same positions: on the red line, the column is normal, and a tail that bends away from it is longer
@@ -994,7 +996,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% if transforms.unfixed %}
         <p>Skewed, but neither transformation both brings them within ±{{ "%g" | format(fixed_skew) }} and straightens
            their QQ plot:
-            {% for check in transforms.unfixed %}<strong>{{ check.column | e }}</strong>
+            {% for check in transforms.unfixed %}<strong>{{ check.column }}</strong>
             (skew {{ "%.2f" | format(check.skew_before) }}: {{ describe_attempts(check) }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>
         {% endif %}
         {% if plots.qq %}
@@ -1011,7 +1013,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% if plots.categorical %}
         <h3>Categorical Distributions ({{ plots.categorical | length }})</h3>
         {% if chart_notes.categorical %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.categorical | e }}</p>
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.categorical }}</p>
         {% endif %}
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             {% for img in plots.categorical %}
@@ -1040,7 +1042,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% if plots.target_categorical %}
         <h3>Target vs Categorical Columns ({{ plots.target_categorical | length }})</h3>
         {% if chart_notes.target_categorical %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.target_categorical | e }}</p>
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.target_categorical }}</p>
         {% endif %}
         <p style="color: #555; margin-top: -8px;">
             Grouped bars of each categorical column against the target
@@ -1121,7 +1123,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% if plots.time_of_day %}
         <h3>By Hour of the Day ({{ plots.time_of_day | length }})</h3>
         {% if chart_notes.time_of_day %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.time_of_day | e }}</p>
+        <p style="color: #555; margin-top: -8px;">{{ chart_notes.time_of_day }}</p>
         {% endif %}
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
             {% for img in plots.time_of_day %}
@@ -1348,7 +1350,7 @@ def generate_html_report(
     }
 
     # Render template
-    template = Template(HTML_TEMPLATE)
+    template = Template(HTML_TEMPLATE, autoescape=True)
     html_content = template.render(**template_data)
 
     # Write to file
