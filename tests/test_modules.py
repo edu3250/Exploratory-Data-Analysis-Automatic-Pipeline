@@ -2692,9 +2692,7 @@ class TestMulticollinearity:
     def test_high_vif_is_dropped_until_every_vif_is_under_ten(self):
         rng = np.random.default_rng(6)
         a, b = rng.normal(size=400), rng.normal(size=400)
-        df = pd.DataFrame(
-            {"a": a, "b": b, "near": a + b + rng.normal(scale=0.05, size=400), "z": rng.normal(size=400)}
-        )
+        df = pd.DataFrame({"a": a, "b": b, "near": a + b + rng.normal(scale=0.05, size=400), "z": rng.normal(size=400)})
 
         report = self._analyze(df)
 

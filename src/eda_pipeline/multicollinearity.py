@@ -226,9 +226,9 @@ def _vif(correlation: np.ndarray, columns: list[str], subset: list[str]) -> tupl
         beta[position] = 0.0
         strongest = float(np.abs(beta).max())
         order = np.argsort(-np.abs(beta))
-        partners[name] = [
-            subset[k] for k in order if k != position and abs(beta[k]) >= _PARTNER_SHARE * strongest
-        ][:_MAX_PARTNERS]
+        partners[name] = [subset[k] for k in order if k != position and abs(beta[k]) >= _PARTNER_SHARE * strongest][
+            :_MAX_PARTNERS
+        ]
     return vif, partners
 
 

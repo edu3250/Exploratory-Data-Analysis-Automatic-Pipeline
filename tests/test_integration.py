@@ -1292,9 +1292,7 @@ class TestDatasetNamingEndToEnd:
         folder.mkdir()
         self._frame().to_csv(folder / "train.csv", index=False)
 
-        results = _make_pipeline(
-            input_file=str(folder / "train.csv"), output_dir=str(tmp_output_dir / "out")
-        ).run()
+        results = _make_pipeline(input_file=str(folder / "train.csv"), output_dir=str(tmp_output_dir / "out")).run()
 
         assert list(results) == ["Kaggle_Titanic_train"]
         output_dir = Path(results["Kaggle_Titanic_train"]["output_dir"])
@@ -1340,9 +1338,9 @@ class TestCopyColumnLists:
 
     def test_names_with_markup_characters_are_escaped_in_the_page(self, tmp_output_dir):
         csv_file = tmp_output_dir / "gastos.csv"
-        pd.DataFrame(
-            {"R&D spend": [float(i) * 1.5 for i in range(42)], "it's": ["low", "mid", "high"] * 14}
-        ).to_csv(csv_file, index=False)
+        pd.DataFrame({"R&D spend": [float(i) * 1.5 for i in range(42)], "it's": ["low", "mid", "high"] * 14}).to_csv(
+            csv_file, index=False
+        )
 
         result = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir)).run()["gastos"]
         html = Path(result["html_report"]).read_text(encoding="utf-8")
@@ -1354,9 +1352,9 @@ class TestCopyColumnLists:
 
     def test_a_section_without_columns_has_no_button(self, tmp_output_dir):
         csv_file = tmp_output_dir / "medidas.csv"
-        pd.DataFrame(
-            {"alto": [float(i) for i in range(40)], "ancho": [(i * 7) % 40 + 0.5 for i in range(40)]}
-        ).to_csv(csv_file, index=False)
+        pd.DataFrame({"alto": [float(i) for i in range(40)], "ancho": [(i * 7) % 40 + 0.5 for i in range(40)]}).to_csv(
+            csv_file, index=False
+        )
 
         result = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir)).run()["medidas"]
         html = Path(result["html_report"]).read_text(encoding="utf-8")
@@ -1404,7 +1402,9 @@ class TestMulticollinearitySection:
         assert "every one of the 3 columns left has a VIF under 5" in html[block:]
 
         section = summary["multicollinearity"]
-        assert [dep["equation"] for dep in section["exact_dependencies"]] == ["living_area = first_floor + second_floor"]
+        assert [dep["equation"] for dep in section["exact_dependencies"]] == [
+            "living_area = first_floor + second_floor"
+        ]
         assert section["suggested_drops"][0]["column"] == "living_area"
         assert list(section["vif_after_drops"]) == ["first_floor", "second_floor", "rooms"]
         assert all(value < 5 for value in section["vif_after_drops"].values())
