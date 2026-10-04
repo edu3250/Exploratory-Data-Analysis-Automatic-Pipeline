@@ -5,7 +5,7 @@ outliers, relationships, target analysis, 40+ charts, and a preprocessing plan w
 recommendation carries the measurement that produced it.
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![tests 412](https://img.shields.io/badge/tests-412%20passing-brightgreen)
+[![CI](https://github.com/edu3250/Exploratory-Data-Analysis-Automatic-Pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/edu3250/Exploratory-Data-Analysis-Automatic-Pipeline/actions/workflows/ci.yml)
 ![coverage 93%](https://img.shields.io/badge/coverage-93%25-brightgreen)
 ![ruff](https://img.shields.io/badge/lint-ruff%20clean-purple)
 ![license MIT](https://img.shields.io/badge/license-MIT-lightgrey)
