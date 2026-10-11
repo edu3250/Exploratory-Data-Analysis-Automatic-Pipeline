@@ -862,3 +862,110 @@ Verified with real output:
 - Vistara's `Products` shows the line and writes no PNG; the Spaceship matrix looks as before.
 - The 24 reports regenerated on `ad40800` have no failed step, and the 13 gap-free ones show the line with no matrix.
 - Opening this stage's PR showed the repository renamed to `Exploratory-Data-Analysis-Automatic-Pipeline`, matching the README's new title. The local remote still uses the old name, which GitHub redirects.
+
+## Stage 41: The formatter on the five files that drifted
+**Goal**: Close the debt stage 32 left written down: `ruff format --check` failed on `cli.py`, `type_inference.py`, `multicollinearity.py`, `test_integration.py` and `test_modules.py`.
+
+**Success Criteria**:
+- `ruff format --check .` passes on every file.
+- Nothing but layout changes.
+
+**Tests**: none new. Each file's syntax tree was compared before and after with `ast.dump`: identical in the five.
+
+**Status**: COMPLETE. PR #59 was merged on 2026-10-03 as `3f4cec0`.
+
+Verified with real output:
+- **418 tests passed**; `ruff check .` clean; 27 files already formatted.
+- Most hunks were lines wrapped for a longer text, the Spanish help and log messages, that fit in 120 columns once translated. The rest were lines added without running the formatter. Nothing ran the check automatically until stage 46.
+
+## Stage 42: The report escapes what the data holds
+**Goal**: The HTML report was rendered without autoescaping, and only the values added most recently carried an explicit `| e`. Column names, the most common value of a categorical column, the target's classes and the alert messages reached the page as markup, so a header such as `<img src=x onerror=alert(1)>` ran a script when the report was opened.
+
+**Success Criteria**:
+- A name or a value that holds markup is shown as text, exactly as written, and creates no element.
+- Nothing is escaped twice.
+
+**Tests** (seen failing first): `tests/test_integration.py::TestReportEscaping`, a dataset with markup in its column names, its values and its target's classes. The page is parsed as a browser does: no element comes from the data, the report keeps its single script, no element gets an event handler, and every name appears in the visible text.
+
+**Status**: COMPLETE. PR #60 was merged on 2026-10-03 as `f31ad2e`.
+
+Verified with real output:
+- **419 tests passed**, 0 failed.
+- `Template(HTML_TEMPLATE, autoescape=True)`, and the 27 `| e` filters dropped. No module builds HTML (checked by searching `src/` for tags and entities outside the template), so nothing had to be marked safe.
+- Each of the 37 files in `data/raw` was rendered twice from the same template data, with `main`'s template and with this one, and both pages were parsed: the same elements and the same visible text in all 37. In the source, `'` becomes `&#39;` (0 to 96 times per report) and three bare `&` in `amazon.csv` become `&amp;`.
+- In the control, the test's dataset, `main` built `<img src=x onerror=alert(1)>` twice, plus `<i>` and `<s>` elements, and the column's name vanished from the quality table.
+
+## Stage 43: A file name every system accepts, and one file per chart
+**Goal**: Each chart's file was named `{kind}_{label}.png` with only `/` replaced. The escaping test of stage 42 logged a failed chart for every awkward name, and reproducing it on `main` showed four ways of losing charts on Windows.
+
+**Success Criteria**:
+- A label that is not text (Excel reads a header such as `2024` as a number) no longer fails the whole visualizations step.
+- `< > : " \ | ? *` and control characters become `_`; a label is cut at 50 characters.
+- Two charts never share a file: a name already taken in the run, compared without case, gets a numbered suffix.
+- Plain labels keep the names they had.
+
+**Tests**: `tests/test_modules.py::TestChartFiles` (3) and `tests/test_integration.py::TestChartFileNames` (2). The two integration tests were seen failing on `main`: the sheet with years as headers had no charts at all, and five awkward or clashing labels gave three histograms, two of them the same image.
+
+**Status**: COMPLETE. PR #61 was merged on 2026-10-03 as `d5471ad`.
+
+Verified with real output:
+- **424 tests passed**, 0 failed.
+- On `main`, probed one character at a time: `? * " |` and `< >` fail with «Invalid argument»; a backslash points at a folder that does not exist; a colon does not fail, because NTFS saves the PNG as a stream of an empty file (`histogram_ratio`, 0 bytes, for `ratio: a/b`); `Age` and `age` write one file.
+- The 37 reports of `data/raw` made with `visualizations.ChartFiles`: 1 127 charts named, every one exactly as `main` named it, no chart or step failed, and no stray or empty file in `plots/`. No charted label there has an unsafe character: `Unnamed: 0` has one, but it is read as an identifier and gets no chart. The longest label has 31 characters.
+- Found and left open: a chart also fails, silently, when its full path passes Windows' 260 characters. In a measurement folder about 230 characters deep, the three solar datasets lost charts such as `scatter_MODULE_TEMPERATURE_vs_IRRADIATION.png`. Under `reports/` there is room to spare.
+
+## Stage 44: The repository goes public
+**Goal**: The user decided to open the repository and asked what had to be done first.
+
+**Success Criteria**:
+- Nothing private in the files, the history or the pull requests.
+- What a visitor sees matches what the code does today.
+
+**Tests**: none; an audit, and one change to the example notebook.
+
+**Status**: COMPLETE. The user made the repository public on 2026-10-03, with a description and topics. PR #62 was merged on 2026-10-10 as `2be341c`.
+
+Verified with real output:
+- In the 128 commits there is no data file, report or log (only the `.gitkeep` files), no token, password or key, and no local path, in the files or in the 61 pull requests of the time.
+- The code, the tests, this plan and 32 of those pull requests name columns and figures of the `mx` and Vistara datasets. The user confirmed those datasets are public.
+- The three screenshots the README takes from GitHub's attachments, uploaded while the repository was private, load without a session.
+- `notebooks/01_eda_template.ipynb` was saved with a run of 2026-09-11: 5 alerts, in Spanish, and 30 charts for `ecommerce.csv`. The same cells give 2 alerts, in English, and 45 charts today. Its cells still run as written (executed in order on a copy of the file), so PR #62 only removes the outputs and the execution counts.
+- Afterwards, on 2026-10-10: the 16 merged branches left on GitHub were deleted, and `main` was protected (a pull request and the nine checks of stage 46 are required, for administrators too).
+
+## Stage 45: Skew and kurtosis on standardized values
+**Goal**: Preparing CI, the suite was run for the first time on something other than Python 3.11 with pandas 3. Under pandas 2.3.3, which is all Python 3.10 can install and which `pyproject.toml` accepts, 7 tests failed, all in the transforms.
+
+**Success Criteria**:
+- The numeric table and the transforms report the same skew and kurtosis under pandas 2 and pandas 3, whatever the column's scale.
+- A Yeo-Johnson that squeezes a column into a sliver is not taken for a fix.
+
+**Tests**: `TestUnivariateAnalysis::test_skew_and_kurtosis_do_not_depend_on_the_scale` and `TestTransforms::test_a_transformation_that_squeezes_the_column_keeps_its_real_skew`. Both fail on `main` under pandas 2.3.3 and pass under pandas 3, where the defect cannot be reproduced.
+
+**Status**: COMPLETE. PR #63 was merged on 2026-10-10 as `1fa337f`.
+
+Verified with real output:
+- pandas 2 returns a skew and a kurtosis of 0 once a column's spread falls under about a millionth of its mean. A lognormal column times 1e-7, plus 0.4, has a skew of 5.16 under pandas 3.0.5 and 0.00 under pandas 2.3.3.
+- Yeo-Johnson at λ ≈ −2.5 leaves the test's column, with a far cluster of 15% of its rows, at 0.39235 ± 0.000003. pandas 2 read its skew as 0 instead of 1.58 (pandas 3 and scipy agree on 1.58), so the pipeline chose Yeo-Johnson, drew its QQ plot and added a Transform line to the plan.
+- Neither measure changes with location or scale, so both are now taken on `univariate_analysis.standardized(values)`: mean 0, standard deviation 1.
+- Full suite with `-W error::UserWarning`: **426 passed** under pandas 3.0.5 (Python 3.11) and **426 passed** under pandas 2.3.3 (Python 3.13).
+- Over `data/raw` (275 numeric columns, 46 transform decisions), under either pandas: no skew or kurtosis moves by more than 2e-12 in relative terms, and no decision changes. No column there is narrow enough to trigger it.
+
+## Stage 46: Continuous integration
+**Goal**: Until now every check ran on one machine. The workflow had been held back since 2026-09-17 until the repository was public, because the badge of a private repository does not render for visitors.
+
+**Success Criteria**:
+- Every push to `main` and every pull request runs `ruff check .`, `ruff format --check .` and the tests.
+- The tests run on Python 3.10 to 3.13, on Ubuntu and on Windows, installed as the README says (`pip install -e ".[dev]"`), with a `UserWarning` failing the run.
+- The README shows the workflow's badge instead of a test count typed by hand.
+
+**Tests**: none new; the workflow runs the 426 there are.
+
+**Status**: COMPLETE. PR #64 was merged on 2026-10-10 as `c610e29`.
+
+Verified with real output:
+- Before pushing: 424 passed on Python 3.11 with pandas 3.0.5, and on Python 3.13 with pandas 3.0.6 from a fresh install, both with `-W error::UserWarning`.
+- The first run, on 2026-10-03, passed on Python 3.11, 3.12 and 3.13 on both systems, Ubuntu for the first time anywhere. It failed on the two Python 3.10 jobs, with pandas 2.3.3 and numpy 2.2.6, in the transforms tests of stage 45, as the pull request said it would.
+- A pull request's checks do not run again when `main` changes, so after stage 45 was merged the branch was brought up to date with `main`. The second run passed the nine checks.
+- Python 3.10 is where pandas 2 is tested: pandas 3 requires Python 3.11.
+- `ruff` is pinned to `>=0.16,<0.17`: a new minor release may change the formatter's style and fail the check on code nobody touched. 0.16.10, which CI installs, agrees with the 0.16.7 used until then.
+- Coverage measured again: **93%** (3 187 statements, 232 missed), so that badge stays. The «tests 412» badge, already stale at 424, became the workflow's.
