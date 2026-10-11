@@ -26,6 +26,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from .univariate_analysis import standardized
+
 logger = logging.getLogger(__name__)
 
 LOG1P = "log1p"
@@ -114,7 +116,7 @@ def _skew(values: np.ndarray) -> Optional[float]:
     """The same skew the numeric table shows (pandas), or None when it cannot be measured."""
     if not np.all(np.isfinite(values)):
         return None
-    skew = float(pd.Series(values).skew())
+    skew = float(standardized(pd.Series(values)).skew())
     return skew if np.isfinite(skew) else None
 
 

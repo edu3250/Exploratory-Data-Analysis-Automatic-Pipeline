@@ -100,6 +100,21 @@ class UnivariateReport:
     text_stats: dict[str, TextStats] = field(default_factory=dict)
 
 
+def standardized(values: pd.Series) -> pd.Series:
+    """
+    ``values`` moved to mean 0 and standard deviation 1, to measure their skew and kurtosis.
+
+    Neither changes with location or scale, so the result is the same, except under pandas 2: it
+    returns 0 for both once the spread falls under about a millionth of the mean, and a Yeo-Johnson
+    that squeezed a column into 0.39235 ± 0.000003 read as perfectly symmetric. On the standardized
+    values pandas 2 and 3 agree. A column without spread is returned as it is.
+    """
+    std = values.std()
+    if not np.isfinite(std) or std == 0:
+        return values
+    return (values - values.mean()) / std
+
+
 def analyze_numeric(series: pd.Series) -> NumericStats:
     """Analyze a numeric column."""
     valid = series.dropna()
@@ -132,8 +147,9 @@ def analyze_numeric(series: pd.Series) -> NumericStats:
     iqr = q75 - q25
 
     # Skewness and kurtosis
-    skewness = float(valid.skew()) if count > 2 else np.nan
-    kurtosis_val = float(valid.kurtosis()) if count > 3 else np.nan
+    shape = standardized(valid)
+    skewness = float(shape.skew()) if count > 2 else np.nan
+    kurtosis_val = float(shape.kurtosis()) if count > 3 else np.nan
 
     # Coefficient of variation
     cv = (std / mean * 100) if mean != 0 else 0

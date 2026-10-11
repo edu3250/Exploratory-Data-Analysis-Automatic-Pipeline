@@ -1026,6 +1026,16 @@ class TestUnivariateAnalysis:
         stats = analyze_numeric(empty)
         assert stats.count == 0
 
+    def test_skew_and_kurtosis_do_not_depend_on_the_scale(self):
+        """pandas 2 returns 0 for both once the spread falls under about a millionth of the mean."""
+        values = np.random.default_rng(3).lognormal(0, 1, 500)
+        wide = analyze_numeric(pd.Series(values))
+        narrow = analyze_numeric(pd.Series(values * 1e-8 + 0.4))
+
+        assert wide.skewness > 4
+        assert narrow.skewness == pytest.approx(wide.skewness, rel=1e-4)
+        assert narrow.kurtosis == pytest.approx(wide.kurtosis, rel=1e-4)
+
     def test_time_of_day_stats(self):
         series = pd.Series(["09:15:00", "18:30:10", "18:45:00", "21:05:59", None], name="hora", dtype="string")
         stats = analyze_time_of_day(series)
@@ -2842,6 +2852,21 @@ class TestTransforms:
         assert check is not None and not check.fixed
         assert check.method is None and check.skew_after is None and check.qq_r_after is None
         assert abs(check.log1p_skew) > FIXED_SKEW and abs(check.yeo_johnson_skew) > FIXED_SKEW
+
+    def test_a_transformation_that_squeezes_the_column_keeps_its_real_skew(self):
+        """Yeo-Johnson at λ ≈ -2.5 leaves this column at 0.39235 ± 0.000003, which pandas 2 read as skew 0."""
+        from scipy import stats as scipy_stats
+
+        from eda_pipeline.transforms import apply_transform, check_transform
+
+        rng = np.random.default_rng(7)
+        values = np.concatenate([rng.normal(100, 5, 850), rng.normal(1000, 5, 150)])
+        check = check_transform(self._series(values))
+        squeezed = apply_transform(values, "yeo-johnson", check.lmbda)
+
+        assert squeezed.std() < 1e-5
+        assert check.yeo_johnson_skew == pytest.approx(scipy_stats.skew(squeezed, bias=False), rel=1e-4)
+        assert check.method is None  # so no QQ plot claims that Yeo-Johnson fixed it
 
     def test_a_lower_skew_without_a_straighter_qq_plot_does_not_count(self):
         # TotalBsmtSF under Yeo-Johnson: skew 1.52 -> 0.23, but r 0.97501 -> 0.97536, because the 37
