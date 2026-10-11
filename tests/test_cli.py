@@ -178,6 +178,47 @@ class TestAnalyzeBatch:
         assert result.exit_code == 0, result.output
         assert "other" not in result.output
 
+    @staticmethod
+    def _nested(root):
+        for name in ("ventas.csv", "mx/clientes.csv", "kaggle titanic/train.csv"):
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _tiny_df().to_csv(path, index=False)
+        return root
+
+    def test_subfolders_left_out_are_named_with_the_option_that_includes_them(self, runner, tmp_output_dir):
+        data_dir = self._nested(tmp_output_dir / "raw")
+
+        result = runner.invoke(cli, ["analyze-batch", str(data_dir), "--output-dir", str(tmp_output_dir / "out")])
+
+        assert result.exit_code == 0, result.output  # leaving them out is not a failure
+        assert "✅ ventas" in result.output and "✅ clientes" not in result.output
+        notice = next(line for line in result.output.splitlines() if "--recursive" in line)
+        assert "2 subfolders were not entered" in notice
+        assert "kaggle titanic (1 file)" in notice and "mx (1 file)" in notice
+
+    def test_recursive_analyzes_the_subfolders_and_has_nothing_to_warn_about(self, runner, tmp_output_dir):
+        data_dir = self._nested(tmp_output_dir / "raw")
+
+        result = runner.invoke(
+            cli, ["analyze-batch", str(data_dir), "--recursive", "--output-dir", str(tmp_output_dir / "out")]
+        )
+
+        assert result.exit_code == 0, result.output
+        for name in ("✅ ventas", "✅ clientes", "✅ kaggle_titanic_train"):
+            assert name in result.output
+        assert "not entered" not in result.output
+
+    def test_a_folder_with_data_only_in_subfolders_says_where_it_is(self, runner, tmp_output_dir):
+        data_dir = tmp_output_dir / "data"
+        (data_dir / "raw").mkdir(parents=True)
+        _tiny_df().to_csv(data_dir / "raw" / "ventas.csv", index=False)
+
+        result = runner.invoke(cli, ["analyze-batch", str(data_dir), "--output-dir", str(tmp_output_dir / "out")])
+
+        assert "No files found to process." in result.output
+        assert "1 subfolder was not entered" in result.output and "raw (1 file)" in result.output
+
     def test_stem_collision_produces_unique_dataset_names(self, runner, tmp_output_dir):
         data_dir = tmp_output_dir / "raw"
         data_dir.mkdir()

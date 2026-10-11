@@ -384,7 +384,28 @@ def load_data(
     return _stringify_nested_cells(df)
 
 
-def discover_batch_files(folder_path: Path, pattern: Optional[str] = None) -> list[Path]:
+def _batch_candidates(folder_path: Path, pattern: Optional[str], recursive: bool) -> tuple[list[Path], list[str]]:
+    """The files a batch would analyze, and a line for each file it leaves out and why."""
+    search = folder_path.rglob if recursive else folder_path.glob
+    patterns = [pattern] if pattern else [f"*{ext}" for ext in SUPPORTED_EXTENSIONS]
+    candidates = sorted({path for one in patterns for path in search(one)})
+
+    files, left_out = [], []
+    for path in candidates:
+        if not path.is_file():
+            continue
+        relative = path.relative_to(folder_path)
+        if any(part.startswith(".") for part in relative.parts):
+            left_out.append(f"Skipping hidden file: {relative}")
+            continue
+        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            left_out.append(f"Skipping file with an unsupported extension: {relative}")
+            continue
+        files.append(path)
+    return files, left_out
+
+
+def discover_batch_files(folder_path: Path, pattern: Optional[str] = None, recursive: bool = False) -> list[Path]:
     """
     Discover data files in a folder for batch processing.
 
@@ -392,35 +413,57 @@ def discover_batch_files(folder_path: Path, pattern: Optional[str] = None) -> li
         folder_path: Folder to scan.
         pattern: Glob pattern (e.g. "*.csv"). If None, all files with a
             supported extension are considered (see SUPPORTED_EXTENSIONS).
+        recursive: Also look in the subfolders, at any depth.
 
     Returns:
-        Sorted list of file paths, excluding hidden files (dotfiles, e.g.
-        ``.gitkeep``) and files with an unsupported extension. Both are
-        logged at INFO level rather than raising, so a single stray file
+        Sorted list of file paths, excluding hidden files (dotfiles such as
+        ``.gitkeep``, and anything inside a dot-folder such as
+        ``.ipynb_checkpoints``) and files with an unsupported extension. Both
+        are logged at INFO level rather than raising, so a single stray file
         never aborts a batch run.
     """
     folder_path = Path(folder_path)
     if not folder_path.is_dir():
         raise NotADirectoryError(f"Not a directory: {folder_path}")
 
-    if pattern:
-        candidates = sorted(set(folder_path.glob(pattern)))
-    else:
-        candidates = sorted({p for ext in SUPPORTED_EXTENSIONS for p in folder_path.glob(f"*{ext}")})
+    files, left_out = _batch_candidates(folder_path, pattern, recursive)
+    for line in left_out:
+        logger.info(line)
+    return files
 
-    files = []
-    for path in candidates:
-        if not path.is_file():
-            continue
-        if path.name.startswith("."):
-            logger.info(f"Skipping hidden file: {path.name}")
-            continue
-        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            logger.info(f"Skipping file with an unsupported extension: {path.name}")
-            continue
-        files.append(path)
 
-    return sorted(files)
+def subfolders_not_entered(folder_path: Path, pattern: Optional[str] = None) -> dict[str, int]:
+    """
+    The subfolders a batch without ``recursive`` leaves out, and how many files each one holds.
+
+    Only subfolders with something to analyze count: each maps to the number of files, at any
+    depth under it, that the same batch would pick up with ``recursive``. A pattern that already
+    reaches into subfolders (``**/*.csv``) leaves nothing out.
+    """
+    folder_path = Path(folder_path)
+    found = set(_batch_candidates(folder_path, pattern, recursive=False)[0])
+    deeper = [path for path in _batch_candidates(folder_path, pattern, recursive=True)[0] if path not in found]
+    counts: dict[str, int] = {}
+    for path in deeper:
+        subfolder = path.relative_to(folder_path).parts[0]
+        counts[subfolder] = counts.get(subfolder, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: item[0].casefold()))
+
+
+_SUBFOLDERS_NAMED = 10
+
+
+def describe_subfolders_not_entered(skipped: dict[str, int]) -> str:
+    """One line for the log and the console: which subfolders were left out, and how to include them."""
+    plural = len(skipped) != 1
+    named = [f"{name} ({count} file{'s' if count != 1 else ''})" for name, count in list(skipped.items())]
+    listed = ", ".join(named[:_SUBFOLDERS_NAMED])
+    if len(named) > _SUBFOLDERS_NAMED:
+        listed += f" and {len(named) - _SUBFOLDERS_NAMED} more"
+    return (
+        f"{len(skipped)} subfolder{'s were' if plural else ' was'} not entered: {listed}. "
+        f"Add --recursive to analyze {'them' if plural else 'it'} too."
+    )
 
 
 def load_batch(folder_path: Path, file_pattern: Optional[str] = None, **kwargs) -> dict[str, pd.DataFrame]:

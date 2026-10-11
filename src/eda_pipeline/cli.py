@@ -10,6 +10,7 @@ from typing import Optional
 import click
 
 from .config import Config, ConfigError, create_default_config_file, load_config_file, merge_configs
+from .data_loader import describe_subfolders_not_entered
 from .pipeline import EDAPipeline
 
 
@@ -56,6 +57,8 @@ def _run_and_report(final_config: Config, verbose: bool) -> None:
 
     if pipeline.batch_output_dir is not None:
         click.secho(f"📁 Batch folder: {pipeline.batch_output_dir}", fg="cyan")
+    if pipeline.skipped_subfolders:
+        click.secho(f"⚠️  {describe_subfolders_not_entered(pipeline.skipped_subfolders)}", fg="yellow")
 
     if "error" in results and len(results) == 1:
         click.secho(f"Error: {results['error']}", fg="red")
@@ -168,6 +171,7 @@ def analyze_file(
 @cli.command()
 @click.argument("input_folder", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--pattern", default=None, help="Glob pattern for the files (default: every supported extension)")
+@click.option("--recursive", is_flag=True, default=False, help="Also analyze the files in the subfolders")
 @click.option("--config", type=click.Path(exists=True), help="Path to a YAML configuration file")
 @click.option("--output-dir", default=None, help="Where to write the reports (default: reports)")
 @click.option("--target", help="Target column to analyze")
@@ -186,6 +190,7 @@ def analyze_file(
 def analyze_batch(
     input_folder,
     pattern,
+    recursive,
     config,
     output_dir,
     target,
@@ -203,13 +208,15 @@ def analyze_batch(
 
     Hidden files and unsupported extensions are skipped (with a warning);
     a file that fails is reported with ❌ and the rest of the batch carries
-    on, unless --strict is used.
+    on, unless --strict is used. Subfolders are named but not entered,
+    unless --recursive is used.
 
     \b
     EXAMPLES:
         eda analyze-batch ./data
         eda analyze-batch ./data --pattern "*.csv" --target target_col
         eda analyze-batch ./raw_data --output-dir ./my_reports
+        eda analyze-batch ./data --recursive
     """
     try:
         base_config = Config()
@@ -218,6 +225,7 @@ def analyze_batch(
         cli_overrides = {
             "input_folder": input_folder,
             "batch_pattern": pattern,
+            "batch_recursive": True if recursive else None,
             "output_dir": output_dir,
             "delimiter": delimiter,
             "encoding": encoding,

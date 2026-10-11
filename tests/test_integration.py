@@ -193,6 +193,50 @@ class TestBatchProcessing:
         # load; the important contract is that it never takes 'good' down with it either way.
         assert "broken" in results
 
+    @staticmethod
+    def _nested(root: Path) -> Path:
+        frame = pd.DataFrame({"monto": [float(i) for i in range(30)], "tipo": ["a", "b", "c"] * 10})
+        for name in ("ventas.csv", "mx/clientes.csv", "co/clientes.csv"):
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            frame.to_csv(path, index=False)
+        return root
+
+    def test_a_batch_says_which_subfolders_it_did_not_enter(self, tmp_output_dir):
+        data_dir = self._nested(tmp_output_dir / "raw")
+
+        pipeline = _make_pipeline(input_folder=str(data_dir), output_dir=str(tmp_output_dir / "out"))
+        results = pipeline.run()
+
+        assert list(results) == ["ventas"]
+        assert pipeline.skipped_subfolders == {"co": 1, "mx": 1}
+
+    def test_a_recursive_batch_reports_every_file_under_its_own_name(self, tmp_output_dir):
+        data_dir = self._nested(tmp_output_dir / "raw")
+
+        pipeline = _make_pipeline(
+            input_folder=str(data_dir), output_dir=str(tmp_output_dir / "out"), batch_recursive=True
+        )
+        results = pipeline.run()
+
+        assert set(results) == {"ventas", "mx_clientes", "co_clientes"}
+        assert pipeline.skipped_subfolders == {}
+        folders = {Path(result["output_dir"]).name for result in results.values()}
+        assert folders == {"ventas", "mx_clientes", "co_clientes"}  # one report each, none overwritten
+        assert all(Path(result["html_report"]).exists() for result in results.values())
+
+    def test_a_pattern_that_goes_deep_gets_one_report_per_file_too(self, tmp_output_dir):
+        """`--pattern "**/*.csv"` already went into subfolders, and two clientes.csv became one report."""
+        data_dir = self._nested(tmp_output_dir / "raw")
+
+        pipeline = _make_pipeline(
+            input_folder=str(data_dir), output_dir=str(tmp_output_dir / "out"), batch_pattern="**/*.csv"
+        )
+        results = pipeline.run()
+
+        assert set(results) == {"ventas", "mx_clientes", "co_clientes"}
+        assert pipeline.skipped_subfolders == {}
+
     def test_batch_stem_collision_gets_unique_dataset_names(self, tmp_output_dir):
         data_dir = tmp_output_dir / "raw"
         data_dir.mkdir()

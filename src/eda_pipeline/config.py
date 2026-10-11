@@ -80,6 +80,7 @@ class Config:
     excel_sheet: Optional[str] = None  # Sheet name or index; first sheet if None
     sample_size: Optional[int] = None  # Random sample for large datasets
     batch_pattern: Optional[str] = None  # Glob pattern for analyze-batch; all supported extensions if None
+    batch_recursive: bool = False  # analyze-batch also enters the subfolders
 
     # Analysis configuration
     column_types: ColumnTypeConfig = field(default_factory=ColumnTypeConfig)
@@ -264,6 +265,7 @@ def create_default_config_file(output_path: Path) -> None:
         "excel_sheet": None,
         "sample_size": None,
         "batch_pattern": None,
+        "batch_recursive": False,
         "column_types": {"numeric": [], "categorical": [], "datetime": [], "text": [], "ignore": []},
         "data_quality": {
             "missing_threshold": 0.95,
