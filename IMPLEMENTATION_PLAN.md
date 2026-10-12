@@ -969,3 +969,23 @@ Verified with real output:
 - Python 3.10 is where pandas 2 is tested: pandas 3 requires Python 3.11.
 - `ruff` is pinned to `>=0.16,<0.17`: a new minor release may change the formatter's style and fail the check on code nobody touched. 0.16.10, which CI installs, agrees with the 0.16.7 used until then.
 - Coverage measured again: **93%** (3 187 statements, 232 missed), so that badge stays. The «tests 412» badge, already stale at 424, became the workflow's.
+
+## Stage 47: A batch names the subfolders it leaves out, and can enter them
+**Goal**: Open since stage 30: `analyze-batch data/raw` analyzed the files at the top of the folder and said nothing about its subfolders. Hidden files and unsupported extensions were announced; whole folders of data were not.
+
+**Success Criteria**:
+- Without the option, the batch analyzes what it did before and names each subfolder it did not enter, with the number of files it holds, in the log and on the console. Its exit code does not change.
+- `--recursive` (`batch_recursive` in the YAML) enters the subfolders, skipping those whose name starts with a dot.
+- No two files of a batch share a report name, however deep they are.
+
+**Tests**: 13. `TestDataLoader` (2: the discovery and the notice), `TestDatasetNaming` (5: the names), `TestBatchProcessing` (3) and `TestAnalyzeBatch` (3). The six pipeline and CLI tests were seen failing first.
+
+**Status**: COMPLETE. PR #66 was merged on 2026-10-12 as `f2ebdad`. It was the first code change to go through CI and the protected `main`.
+
+Verified with real output:
+- **439 tests passed** with `-W error::UserWarning`, and the nine checks on the pull request.
+- Measured first on `data/raw`: 10 files at the top, and 7 subfolders with 28 more that were ignored in silence.
+- One of the new tests showed a defect that was already reachable: `--pattern "**/*.csv"` went into subfolders, and two `clientes.csv` in different folders both became `clientes_csv`, one result and one report folder for two files. `pipeline.batch_dataset_names` now tells files that share a name apart by the folders between the batch folder and the file (`mx_clientes`, `co_clientes`), then by the extension as before, then by a number, comparing without case. A name no other file has is never changed.
+- `analyze-batch data/raw`: the same 10 reports, exit code 0, and «7 subfolders were not entered: Housing_prices (6 files), Kaggle Titanic (3 files), mx (4 files), penguins (2 files), solar_generation (2 files), spaceship_titanic (3 files), Vistara (8 files). Add --recursive to analyze them too.»
+- `analyze-batch data/raw --recursive`: 38 files under 38 distinct names, and 37 reports with no failed step. The one without a report is `Housing_prices/data_description.txt`, prose that does not parse as a table: it is reported as failed and the rest carries on, as any unreadable file already was.
+- Recursion is opt-in: a default that changes what an existing command analyzes would surprise whoever points it at a large tree.
