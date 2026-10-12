@@ -59,6 +59,9 @@ eda analyze-file your_data.csv --target your_label_column
 # every supported file in a folder, in one run; a file that fails does not abort the rest
 eda analyze-batch data/raw/
 
+# its subfolders too (without --recursive they are named, not analyzed)
+eda analyze-batch data/raw/ --recursive
+
 # a YAML you can edit: delimiters, encodings, column types, thresholds, which charts to draw
 eda init-config
 ```

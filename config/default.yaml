@@ -1,4 +1,5 @@
 batch_pattern: null
+batch_recursive: false
 column_types:
   categorical: []
   datetime: []

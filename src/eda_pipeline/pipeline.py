@@ -14,7 +14,13 @@ import pandas as pd
 
 from .chart_columns import choose_chart_columns
 from .config import Config
-from .data_loader import discover_batch_files, load_data, replace_missing_placeholders
+from .data_loader import (
+    describe_subfolders_not_entered,
+    discover_batch_files,
+    load_data,
+    replace_missing_placeholders,
+    subfolders_not_entered,
+)
 from .data_quality import SEVERITY_ORDER, Alert, DataQualityReport, analyze_data_quality
 from .html_report import generate_html_report
 from .logging_util import generate_correlation_id, setup_logging
@@ -119,6 +125,41 @@ def dataset_name_for(file_path: Path) -> str:
 
     slug = _slug(parent)
     return f"{slug}_{stem}" if slug else stem
+
+
+def batch_dataset_names(files: list[Path], folder_path: Path) -> dict[Path, str]:
+    """
+    What each file of a batch is called, with no two alike, since each name is a report folder.
+
+    A file keeps its ``dataset_name_for`` while no other file has it. Files that share a name take,
+    in turn and only while they still clash: the folders between the batch folder and the file
+    (``mx/clientes.csv`` and ``co/clientes.csv`` become ``mx_clientes`` and ``co_clientes``), then
+    the extension (``sales_csv``, ``sales_parquet``), then a number. Names are compared without
+    case, because two folders that differ only in case are one folder on Windows and macOS.
+    """
+    names = {path: dataset_name_for(path) for path in files}
+
+    def clashing() -> list[Path]:
+        counts = Counter(name.casefold() for name in names.values())
+        return [path for path, name in names.items() if counts[name.casefold()] > 1]
+
+    for path in clashing():
+        try:
+            folders = path.relative_to(folder_path).parent.parts
+        except ValueError:  # a file from outside the batch folder has no folders to tell it apart
+            folders = ()
+        prefix = _slug("_".join(folders))
+        if prefix:
+            names[path] = f"{prefix}_{path.stem}"
+    for path in clashing():
+        names[path] = f"{names[path]}_{path.suffix.lstrip('.').lower()}"
+    taken = Counter()
+    for path in clashing():
+        key = names[path].casefold()
+        taken[key] += 1
+        if taken[key] > 1:
+            names[path] = f"{names[path]}_{taken[key]}"
+    return names
 
 
 class TargetColumnNotFoundError(ValueError):
@@ -227,6 +268,8 @@ class EDAPipeline:
         self.results = {}
         # On a batch run, the folder that holds every report of the run (None for a single file).
         self.batch_output_dir = None
+        # Subfolders a batch left out because it was not recursive: {name: files it holds}.
+        self.skipped_subfolders: dict[str, int] = {}
 
     def setup(self):
         """Initialize logging and output directories."""
@@ -281,18 +324,23 @@ class EDAPipeline:
     def _run_batch(self) -> dict:
         """Discover files in the input folder and process them one at a time (not preloaded)."""
         folder_path = Path(self.config.input_folder)
-        files = discover_batch_files(folder_path, self.config.batch_pattern)
+        recursive = self.config.batch_recursive
+        files = discover_batch_files(folder_path, self.config.batch_pattern, recursive=recursive)
         self.logger.info(f"Found {len(files)} file(s) to process in {folder_path}")
+        if not recursive:
+            self.skipped_subfolders = subfolders_not_entered(folder_path, self.config.batch_pattern)
+            if self.skipped_subfolders:
+                self.logger.warning(describe_subfolders_not_entered(self.skipped_subfolders))
 
         # One folder for the whole run: a folder of eight files used to scatter eight timestamped
         # report folders across the output directory, mixed with those of every previous run.
         self.batch_output_dir = Path(self.config.output_dir) / self._batch_run_folder_name(folder_path, _timestamp())
         self.logger.info(f"This batch will write its reports to: {self.batch_output_dir}")
 
-        name_counts = Counter(dataset_name_for(f) for f in files)
+        names = batch_dataset_names(files, folder_path)
         all_results = {}
         for file_path in files:
-            dataset_name = self._unique_dataset_name(file_path, name_counts)
+            dataset_name = names[file_path]
             all_results[dataset_name] = self._load_and_analyze(file_path, dataset_name, self.batch_output_dir)
 
         return all_results
@@ -318,14 +366,6 @@ class EDAPipeline:
         if batch_dir is not None:
             return batch_dir / dataset_name
         return Path(self.config.output_dir) / f"{dataset_name}_{_timestamp()}"
-
-    @staticmethod
-    def _unique_dataset_name(file_path: Path, name_counts: Counter) -> str:
-        """Disambiguate same-name files (e.g. sales.csv / sales.parquet) with a suffix hint."""
-        name = dataset_name_for(file_path)
-        if name_counts[name] > 1:
-            return f"{name}_{file_path.suffix.lstrip('.').lower()}"
-        return name
 
     def _load_and_analyze(self, file_path: Path, dataset_name: str, batch_dir: Path | None = None) -> dict:
         """

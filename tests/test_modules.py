@@ -27,6 +27,7 @@ from eda_pipeline.data_loader import (
     list_excel_sheets,
     load_batch,
     load_data,
+    subfolders_not_entered,
 )
 from eda_pipeline.data_quality import analyze_data_quality, analyze_duplicates
 from eda_pipeline.html_report import (
@@ -43,7 +44,7 @@ from eda_pipeline.outlier_detection import (
     detect_outliers_mad,
     isolation_forest_cutoff,
 )
-from eda_pipeline.pipeline import dataset_name_for
+from eda_pipeline.pipeline import batch_dataset_names, dataset_name_for
 from eda_pipeline.relationships import association_matrix, correlation_ratio, cramers_v, pearson_correlation
 from eda_pipeline.target_analysis import analyze_class_balance
 from eda_pipeline.type_inference import (
@@ -318,6 +319,35 @@ class TestDataLoader:
         files = discover_batch_files(tmp_output_dir, "*.csv")
 
         assert [f.name for f in files] == ["a.csv"]
+
+    @staticmethod
+    def _nested(root: Path) -> Path:
+        """A folder with one file of its own, two subfolders that hold data, and two that must not count."""
+        layout = ["top.csv", "mx/clientes.csv", "mx/cobranza.json", "kaggle/titanic/train.csv", "kaggle/notes.md"]
+        layout += [".ipynb_checkpoints/top-checkpoint.csv", "docs/readme.md"]
+        for name in layout:
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x\n1\n")
+        return root
+
+    def test_discover_batch_files_stays_in_the_folder_unless_told_to_go_deeper(self, tmp_output_dir):
+        root = self._nested(tmp_output_dir)
+
+        assert [f.name for f in discover_batch_files(root)] == ["top.csv"]
+        deep = [f.relative_to(root).as_posix() for f in discover_batch_files(root, recursive=True)]
+        # Hidden folders are left out like hidden files: a notebook checkpoint is not a dataset.
+        assert deep == ["kaggle/titanic/train.csv", "mx/clientes.csv", "mx/cobranza.json", "top.csv"]
+        only_csv = [f.relative_to(root).as_posix() for f in discover_batch_files(root, "*.csv", recursive=True)]
+        assert only_csv == ["kaggle/titanic/train.csv", "mx/clientes.csv", "top.csv"]
+
+    def test_subfolders_not_entered_counts_the_files_each_one_holds(self, tmp_output_dir):
+        """`analyze-batch data/raw` skipped 7 subfolders with 28 files and said nothing."""
+        root = self._nested(tmp_output_dir)
+
+        assert subfolders_not_entered(root) == {"kaggle": 1, "mx": 2}  # not docs, not the hidden one
+        assert subfolders_not_entered(root, "*.csv") == {"kaggle": 1, "mx": 1}
+        assert subfolders_not_entered(root, "**/*.csv") == {}  # that pattern already went in
 
     # --- Misc error paths / legacy helpers ----------------------------------------------------
 
@@ -2591,6 +2621,38 @@ class TestDatasetNaming:
     def test_the_submission_files_kaggle_ships_are_split_names_too(self):
         assert dataset_name_for(Path("d/titanic/gender_submission.csv")) == "titanic_gender_submission"
         assert dataset_name_for(Path("d/titanic/sample_submission.csv")) == "titanic_sample_submission"
+
+    @staticmethod
+    def _names(root: str, *files: str) -> list[str]:
+        paths = [Path(root) / name for name in files]
+        named = batch_dataset_names(paths, Path(root))
+        return [named[path] for path in paths]
+
+    def test_a_batch_keeps_the_plain_name_while_it_is_the_only_one(self):
+        assert self._names("d", "ventas.csv", "mx/clientes.csv") == ["ventas", "clientes"]
+
+    def test_the_same_name_in_two_folders_takes_each_folder(self):
+        """Both were «clientes_csv»: one result and one report folder for two files."""
+        assert self._names("d", "mx/clientes.csv", "co/clientes.csv") == ["mx_clientes", "co_clientes"]
+        assert self._names("d", "clientes.csv", "mx/clientes.csv") == ["clientes", "mx_clientes"]
+        assert self._names("d", "a/x y/train.csv", "b/x y/train.csv") == ["a_x_y_train", "b_x_y_train"]
+
+    def test_the_same_name_in_one_folder_takes_the_extension(self):
+        assert self._names("d", "sales.csv", "sales.parquet") == ["sales_csv", "sales_parquet"]
+        assert self._names("d", "a/sales.csv", "a/sales.parquet", "b/sales.csv") == [
+            "a_sales_csv",
+            "a_sales_parquet",
+            "b_sales",
+        ]
+
+    def test_names_that_differ_only_in_case_are_still_told_apart(self):
+        """«Titanic_train» and «titanic_train» would share one report folder on Windows and macOS."""
+        names = self._names("d", "Titanic/train.csv", "titanic_train.csv")
+        assert len({name.casefold() for name in names}) == 2
+
+    def test_a_number_settles_what_folder_and_extension_do_not(self):
+        names = self._names("d", "sales.csv", "a/sales.csv", "a_sales.csv")
+        assert names[0] == "sales" and len(set(names)) == 3
 
 
 class TestColumnListSnippet:
