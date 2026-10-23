@@ -177,7 +177,11 @@ def analyze_constants(
         elif len(value_counts) == 1:
             constant_cols.append(col)
         else:
-            most_common_pct = value_counts.iloc[0] / len(df)
+            # The most common value that is a value: counting the gaps as one made a column of 43
+            # values in 130 100 rows (Steam's Score rank) read as «one value on 100.0% of the rows»,
+            # repeating its missing-values alert under a wrong name. The share stays over all rows.
+            present = df[col].value_counts(dropna=True)
+            most_common_pct = present.iloc[0] / len(df) if len(present) else 0.0
             if most_common_pct > constant_threshold:
                 quasi_constant_cols[col] = most_common_pct * 100
 

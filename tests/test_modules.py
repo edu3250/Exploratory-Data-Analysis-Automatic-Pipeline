@@ -738,6 +738,25 @@ class TestDataQuality:
         report = analyze_data_quality(synthetic_dataset)
         assert "quasi_constant" in report.quasi_constant_columns
 
+    def test_a_mostly_missing_column_is_not_almost_constant(self):
+        """Steam's Score rank: 43 values in 130 100 rows, read as «one value on 100.0% of the rows»."""
+        n = 10_000
+        df = pd.DataFrame(
+            {
+                "rango": [99.0] * 12 + [100.0] * 8 + [98.0] * 3 + [np.nan] * (n - 23),
+                "casi": ["Mensual"] * (n - 30) + ["Anual"] * 10 + [None] * 20,
+                "mitad": ["X"] * (n // 2) + [None] * (n // 2),
+            }
+        )
+
+        report = analyze_data_quality(df)
+
+        assert "rango" not in report.quasi_constant_columns  # what dominates it is the gap, already its own alert
+        assert report.quasi_constant_columns["casi"] == pytest.approx(99.7)  # a real value, on 99.7% of all rows
+        assert "mitad" not in report.quasi_constant_columns and "mitad" not in report.constant_columns
+        messages = [alert.message for alert in report.alerts if alert.column == "rango"]
+        assert messages and all("Almost constant" not in message for message in messages)
+
     def test_high_cardinality(self, synthetic_dataset):
         report = analyze_data_quality(synthetic_dataset)
         assert "high_cardinality" in report.high_cardinality_columns
