@@ -82,6 +82,10 @@ def dtype_label(dtype: object) -> str:
 # never reach pd.to_datetime. Restricted to the separators used by the explicit
 # formats below ('-', '/'), which also keeps decimal-comma numbers out.
 _DATE_LIKE_PATTERN = re.compile(r"^\s*\d{1,4}[-/]\d{1,2}[-/]\d{1,4}([ T]\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?)?\s*$")
+# The month in English words, as Steam writes its release dates: "Aug 1, 2023", "August 1, 2023",
+# "1 Aug 2023". The day and a four-digit year are required, so "May the best win" or "Dec 8 items"
+# never reach the parser. Month names in other languages are not covered: %b and %B read English.
+_MONTH_NAME_DATE_PATTERN = re.compile(r"^\s*(?:[A-Za-z]{3,9} \d{1,2}, \d{4}|\d{1,2} [A-Za-z]{3,9} \d{4})\s*$")
 
 # Explicit candidate formats tried in order. ISO forms come first (unambiguous),
 # then day-first forms (preferred for Spanish-speaking users), then month-first
@@ -108,6 +112,12 @@ _DATE_FORMATS: tuple[str, ...] = (
     "%d-%m-%y",
     "%m/%d/%y",
     "%m-%d-%y",
+    # The month in words (see _MONTH_NAME_DATE_PATTERN). Across data/raw only Steam's Release date
+    # uses them.
+    "%b %d, %Y",
+    "%B %d, %Y",
+    "%d %b %Y",
+    "%d %B %Y",
 )
 
 _DATE_SUCCESS_RATIO_THRESHOLD = 0.9
@@ -117,7 +127,7 @@ def _looks_like_date_string(value: object) -> bool:
     """Cheap regex pre-check: does this look like a date at all?"""
     if not isinstance(value, str):
         return False
-    return bool(_DATE_LIKE_PATTERN.match(value))
+    return bool(_DATE_LIKE_PATTERN.match(value) or _MONTH_NAME_DATE_PATTERN.match(value))
 
 
 def _detect_datetime_series(valid: pd.Series, sample_size: int = 200) -> bool:

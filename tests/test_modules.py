@@ -653,6 +653,28 @@ class TestTypeInference:
         assert dtype != "datetime"
         assert len(recwarn) == 0
 
+    def test_dates_with_the_month_in_words_are_detected(self, recwarn):
+        """Steam's Release date («Aug 1, 2023») was a category with 5 141 values."""
+        for values in (
+            ["Aug 1, 2023", "Dec 8, 2014", "Mar 28, 2019", "Nov 30, 2016"],
+            ["August 1, 2023", "December 8, 2014", "March 28, 2019", "November 30, 2016"],
+            ["1 Aug 2023", "8 Dec 2014", "28 Mar 2019", "30 Nov 2016"],
+            ["1 August 2023", "8 December 2014", "28 March 2019", "30 November 2016"],
+        ):
+            series = pd.Series(values * 10, dtype="str")
+            assert infer_semantic_type(series) == "datetime", values[0]
+        assert len(recwarn) == 0
+
+    def test_dates_with_the_month_in_words_are_read_as_dates(self):
+        from eda_pipeline.type_inference import coerce_to_datetime
+
+        parsed = coerce_to_datetime(pd.Series(["Aug 1, 2023", "Dec 8, 2014", "1 March 2019"], dtype="str"))
+        assert parsed.dt.strftime("%Y-%m-%d").tolist()[:2] == ["2023-08-01", "2014-12-08"]
+
+    def test_text_that_starts_with_a_month_name_is_not_a_date(self):
+        series = pd.Series(["May the best win", "June bug report", "March 2 times", "Dec 8 items"] * 10, dtype="str")
+        assert infer_semantic_type(series) != "datetime"
+
     # --- Bug #13: column_types overrides -----------------------------------------------------
 
     def test_apply_column_type_overrides_coerces_numeric_and_reports_failures(self):
