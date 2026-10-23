@@ -206,10 +206,11 @@ def _detect_time_series(valid: pd.Series, sample_size: int = 200) -> bool:
 
 
 # A number that names an entity instead of measuring it: "id", "customer_id", "id_cliente",
-# "orderId", "row_key". Deliberately narrow: "numero_creditos" in the Mexican data is a count, and
-# a column called "humid" is not a key.
+# "orderId", "AppID" (Steam), "row_key". Deliberately narrow: "numero_creditos" in the Mexican data
+# is a count, a column called "humid" is not a key, and neither is a word in capitals such as "PAID":
+# the "Id" or "ID" has to follow a lowercase letter or a digit.
 _IDENTIFIER_NAME_PATTERN = re.compile(r"^(?:id|uuid|guid)$|^id[_\-]|[_\-]id$|[_\-]key$", re.IGNORECASE)
-_CAMEL_CASE_ID_PATTERN = re.compile(r"[a-z0-9]Id$")
+_CAMEL_CASE_ID_PATTERN = re.compile(r"[a-z0-9]I[dD]$")
 
 
 def _has_identifier_name(name: object) -> bool:
