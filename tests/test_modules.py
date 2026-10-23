@@ -616,6 +616,17 @@ class TestTypeInference:
         readings = np.random.default_rng(0).integers(20, 100, 500)  # not 1, 2, 3...: that is a counter
         assert infer_semantic_type(pd.Series(readings, name="humid")) == "numeric_continuous"
 
+    def test_a_name_ending_in_capital_id_is_an_identifier(self):
+        """Steam's AppID got a histogram, a VIF entry and a StandardScaler line in the plan."""
+        keys = np.random.default_rng(2).permutation(np.arange(10, 4_000_000, 7_919))[:500]
+        for name in ("AppID", "UserID", "customerID", "order2ID"):
+            assert infer_semantic_type(pd.Series(keys, name=name)) == "identifier", name
+
+    def test_a_word_in_capitals_that_ends_in_id_is_not_an_identifier(self):
+        readings = np.random.default_rng(3).integers(20, 100, 500)
+        for name in ("PAID", "VALID", "COVID", "Paid"):
+            assert infer_semantic_type(pd.Series(readings, name=name)) == "numeric_continuous", name
+
     # --- Bug #6: date inference must be precise and warning-free -----------------------------
 
     def test_string_dates_iso_format_detected_without_warning(self, recwarn):
