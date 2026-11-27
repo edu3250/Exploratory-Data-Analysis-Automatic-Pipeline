@@ -1598,6 +1598,71 @@ class _PageParser(HTMLParser):
         self.text.append(data)
 
 
+class TestReportLayout:
+    """The report's shell: navigation, summary, grouped alerts, theme, and nothing loaded from outside."""
+
+    @staticmethod
+    def _report(tmp_output_dir):
+        rng = np.random.default_rng(51)
+        n = 300
+        df = pd.DataFrame(
+            {
+                "edad": rng.integers(18, 80, n),
+                "monto": rng.lognormal(6, 1, n).round(2),
+                "codigo": [f"C-{i:04d}-{rng.integers(1000)}" for i in range(n)],
+                "nota": [f"texto libre {i} con palabras" for i in range(n)],
+                "ciudad": [f"ciudad {i}" for i in rng.integers(0, 150, n)],
+                "grupo": rng.choice(["a", "b", "c"], n),
+                "sale": rng.choice([0, 1], n),
+            }
+        )
+        csv_file = tmp_output_dir / "layout.csv"
+        df.to_csv(csv_file, index=False)
+        result = _make_pipeline(
+            input_file=str(csv_file), output_dir=str(tmp_output_dir), target=TargetConfig(target_column="sale")
+        ).run()["layout"]
+        return result, Path(result["html_report"]).read_text(encoding="utf-8")
+
+    def test_the_navigation_reaches_every_section_it_lists(self, tmp_output_dir):
+        _, html = self._report(tmp_output_dir)
+        nav = re.search(r'<nav class="toc"[^>]*>(.*?)</nav>', html, re.S)
+        assert nav, "the report has no section navigation"
+        targets = re.findall(r'href="#([\w-]+)"', nav.group(1))
+        for section in ("resumen", "alertas", "calidad", "univariado", "target", "visualizaciones", "preprocesamiento"):
+            assert section in targets, section
+        for target in targets:
+            assert f'id="{target}"' in html, f"the navigation points at a missing #{target}"
+
+    def test_the_summary_comes_first_and_alerts_are_grouped(self, tmp_output_dir):
+        result, html = self._report(tmp_output_dir)
+        summary = json.loads(Path(result["summary_json"]).read_text(encoding="utf-8"))
+        cardinality = [a for a in summary["alerts"] if a["kind"] == "high_cardinality"]
+        assert len(cardinality) >= 2  # codigo, nota or ciudad
+
+        assert html.index('id="resumen"') < html.index('id="alertas"') < html.index('id="calidad"')
+        alerts = html[html.index('id="alertas"') : html.index('id="calidad"')]
+        assert alerts.count("High cardinality") == 1  # one row for all of them
+        for alert in cardinality:
+            assert alert["column"] in alerts and alert["detail"] in alerts
+
+    def test_it_follows_the_system_theme_and_offers_a_toggle(self, tmp_output_dir):
+        _, html = self._report(tmp_output_dir)
+        assert "prefers-color-scheme: dark" in html
+        assert 'id="theme-toggle"' in html
+
+    def test_nothing_is_loaded_from_outside_the_file(self, tmp_output_dir):
+        """The report works offline: no stylesheet, script, font or image from the network."""
+        _, html = self._report(tmp_output_dir)
+        assert not re.search(r'(?:src|href)\s*=\s*"(?:https?:)?//', html)
+        assert "@import" not in html and "url(http" not in html
+
+    def test_chart_galleries_fold(self, tmp_output_dir):
+        _, html = self._report(tmp_output_dir)
+        charts = html[html.index('id="visualizaciones"') : html.index('id="preprocesamiento"')]
+        assert '<details class="fold" open>' in charts
+        assert "<summary><h3>Numeric Distributions" in charts
+
+
 class TestReportEscaping:
     """Column names and values are text in the report, whatever characters they hold."""
 

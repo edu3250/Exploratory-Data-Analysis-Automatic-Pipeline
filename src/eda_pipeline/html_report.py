@@ -27,6 +27,54 @@ from .visualizations import (
 
 logger = logging.getLogger(__name__)
 
+SEVERITIES = ("critical", "high", "medium", "low")
+
+# Alerts of these kinds name one column each and share their advice, so a report lists them as one line
+# with a chip per column ("High cardinality · 10 columns"). Every other kind (duplicates, empty rows,
+# a constant-columns list, leakage, class imbalance) keeps its own line and its full message.
+ALERT_GROUP_TITLES = {
+    "missing": "Missing values",
+    "quasi_constant": "Almost constant",
+    "high_cardinality": "High cardinality",
+    "punctuation_missing": "Punctuation read as missing",
+    "mixed_types": "Mixed types",
+    "numbers_as_text": "Numbers kept as text",
+}
+
+
+def alert_counts(alerts) -> dict[str, int]:
+    """How many alerts of each severity, every severity present even at 0."""
+    return {severity: sum(1 for alert in alerts if alert.severity == severity) for severity in SEVERITIES}
+
+
+def alert_groups(alerts) -> list[dict]:
+    """
+    The alerts as the report lists them: one group per severity, most severe first, in which alerts of
+    one groupable kind and the same advice share a row that lists their columns and figures.
+    """
+    groups = []
+    for severity in SEVERITIES:
+        rows, by_key = [], {}
+        for alert in (a for a in alerts if a.severity == severity):
+            kind = getattr(alert, "kind", None)
+            if kind in ALERT_GROUP_TITLES and alert.column is not None:
+                key = (kind, alert.recommendation)
+                if key not in by_key:
+                    by_key[key] = {
+                        "title": ALERT_GROUP_TITLES[kind],
+                        "columns": [],
+                        "recommendation": alert.recommendation,
+                    }
+                    rows.append(by_key[key])
+                by_key[key]["columns"].append((alert.column, getattr(alert, "detail", None)))
+            else:
+                rows.append({"title": alert.message, "columns": [], "recommendation": alert.recommendation})
+        if rows:
+            groups.append(
+                {"severity": severity, "count": sum(1 for a in alerts if a.severity == severity), "rows": rows}
+            )
+    return groups
+
 
 def format_measure(value: object, decimals: int = 3) -> str:
     """
@@ -110,328 +158,219 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EDA report: {{ dataset_name }}</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f5f5;
-            color: #333;
-            line-height: 1.6;
+        /* Instrument panel: cool neutral ground, white panels, a compact sans with figures in mono. The accent
+           marks the target and the current section; severity has its own scale. Light and dark follow the
+           system, and the toggle overrides it. Charts are PNGs, so in dark mode they sit on light plates. */
+        :root {
+            --font-sans: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+            --ground: #eef1f4; --surface: #ffffff; --sunken: #f5f7f9; --ink: #121a22; --muted: #55616d; --rule: #d6dce2;
+            --accent: #0a6a8f; --accent-ink: #ffffff; --accent-soft: #e2f0f6; --plate: #ffffff;
+            --sev-low: #2f5f8a; --sev-low-bg: #e8f0f7; --sev-medium: #8a5a00; --sev-medium-bg: #faf0da;
+            --sev-high: #a3440f; --sev-high-bg: #fbe8dc; --sev-critical: #a1172f; --sev-critical-bg: #fbe3e7;
+            --ok: #2d6a3e; --ok-bg: #e2f0e5; --focus: #1a73c7;
+            color-scheme: light;
         }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]) {
+                --ground: #0e1318; --surface: #161d24; --sunken: #121820; --ink: #e3e9ee; --muted: #9aa7b3; --rule: #2a343e;
+                --accent: #5cc0e6; --accent-ink: #06222e; --accent-soft: #15303c; --plate: #eef1f4;
+                --sev-low: #9cc3e6; --sev-low-bg: #18283a; --sev-medium: #e8c06a; --sev-medium-bg: #33291a;
+                --sev-high: #f0a374; --sev-high-bg: #3a2418; --sev-critical: #f28b9c; --sev-critical-bg: #3d1b22;
+                --ok: #8fd3a2; --ok-bg: #1c3324; --focus: #7cb8f2; color-scheme: dark;
+            }
         }
-        header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px 20px;
-            text-align: center;
+        :root[data-theme="dark"] {
+            --ground: #0e1318; --surface: #161d24; --sunken: #121820; --ink: #e3e9ee; --muted: #9aa7b3; --rule: #2a343e;
+            --accent: #5cc0e6; --accent-ink: #06222e; --accent-soft: #15303c; --plate: #eef1f4;
+            --sev-low: #9cc3e6; --sev-low-bg: #18283a; --sev-medium: #e8c06a; --sev-medium-bg: #33291a;
+            --sev-high: #f0a374; --sev-high-bg: #3a2418; --sev-critical: #f28b9c; --sev-critical-bg: #3d1b22;
+            --ok: #8fd3a2; --ok-bg: #1c3324; --focus: #7cb8f2; color-scheme: dark;
         }
-        header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
+        * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; scroll-padding-top: 1.25rem; }
+        @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before { transition: none !important; } }
+        body { margin: 0; background: var(--ground); color: var(--ink); font: 0.9375rem/1.55 var(--font-sans); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+        ::selection { background: var(--accent); color: var(--accent-ink); }
+        a { color: var(--accent); text-underline-offset: 0.2em; }
+        :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+        code, pre { font-family: var(--font-mono); font-size: 0.9em; }
+        p { margin: 0 0 0.85rem; max-width: 72ch; }
+        ul, ol { margin: 0 0 0.85rem; padding-left: 1.4rem; }
+        svg.i { width: 1rem; height: 1rem; flex: none; vertical-align: -0.15em; }
+
+        .skip { position: absolute; left: 1rem; top: -3rem; z-index: 50; background: var(--surface); color: var(--ink); padding: 0.5rem 0.8rem;
+            border-radius: 8px; border: 1px solid var(--rule); }
+        .skip:focus { top: 1rem; }
+        .shell { max-width: 80rem; margin: 0 auto; padding: 1.5rem max(16px, env(safe-area-inset-right, 0px)) 3rem max(16px, env(safe-area-inset-left, 0px)); }
+        .masthead { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
+        .masthead .kind { color: var(--muted); font-size: 0.82rem; margin: 0 0 0.25rem; }
+        .masthead h1 { margin: 0; font-size: 1.6rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+        .chips { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--muted); }
+        .chips > span { background: var(--surface); border: 1px solid var(--rule); border-radius: 999px; padding: 0.25rem 0.6rem; }
+        .chips strong { font-family: var(--font-mono); font-weight: 500; color: var(--ink); }
+        .chips .status { border: 0; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.7rem; padding: 0.35rem 0.6rem; }
+        .status--ok { background: var(--ok-bg) !important; color: var(--ok); }
+        .status--failed { background: var(--sev-high-bg) !important; color: var(--sev-high); }
+        .theme-toggle { font: inherit; font-size: 0.78rem; font-weight: 600; color: var(--ink); background: var(--surface); border: 1px solid var(--rule);
+            border-radius: 999px; padding: 0.25rem 0.7rem; cursor: pointer; }
+
+        .layout { display: grid; gap: 1.5rem; grid-template-columns: 13rem minmax(0, 1fr); align-items: start; }
+        .toc { position: sticky; top: 1rem; background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 0.5rem; font-size: 0.86rem; }
+        .toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.1rem; }
+        .toc a { display: flex; justify-content: space-between; gap: 0.5rem; padding: 0.4rem 0.6rem; border-radius: 7px; color: var(--muted); text-decoration: none; }
+        .toc a[aria-current="true"] { color: var(--ink); background: var(--accent-soft); font-weight: 600; }
+        .toc .count { font-family: var(--font-mono); font-weight: 400; }
+        .toc .sub a { padding-left: 1.2rem; font-size: 0.82rem; }
+        main { display: grid; gap: 1.25rem; min-width: 0; }
+        main > section { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 1.25rem 1.4rem 1.4rem; min-width: 0; }
+        main > section > h2, .section-head h2 { font-size: 1.15rem; font-weight: 700; margin: 0 0 1rem; letter-spacing: -0.005em; }
+        .section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.6rem 1rem; margin-bottom: 1rem; }
+        .section-head h2 { margin: 0; }
+        h3 { font-size: 1rem; font-weight: 650; margin: 1.6rem 0 0.6rem; }
+        h4 { font-size: 0.95rem; font-weight: 650; margin: 1.2rem 0 0.5rem; color: var(--ink); }
+        .chart-note { color: var(--muted); font-size: 0.88rem; }
+        .no-data { padding: 0.9rem 1rem; background: var(--sunken); border-radius: 8px; color: var(--muted); }
+
+        .readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+        .stat-box { padding: 0.8rem 0.9rem; display: grid; gap: 0.3rem; align-content: start; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); margin: 0 -1px -1px 0; min-width: 0; }
+        .stat-box .label { font-size: 0.74rem; color: var(--muted); letter-spacing: 0.03em; }
+        .stat-box .value { font-family: var(--font-mono); font-size: 1.15rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+        .stat-box .more { font-size: 0.76rem; color: var(--muted); }
+        .stat-box.is-target .value { color: var(--accent); }
+
+        .table-wrap, .scroll-x { overflow-x: auto; }
+        table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 0.25rem 0 1rem; }
+        th { text-align: left; font-weight: 600; color: var(--muted); font-size: 0.7rem; letter-spacing: 0.05em; text-transform: uppercase; }
+        th, td { padding: 0.5rem 0.75rem 0.5rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+        td { font-variant-numeric: tabular-nums; }
+
+        .plot-container { margin: 0.75rem 0; }
+        .plot-container img { display: block; width: 100%; height: auto; background: var(--plate); border: 1px solid var(--rule); border-radius: 10px; padding: 0.4rem; }
+        details.fold { border-top: 1px solid var(--rule); margin-top: 1.25rem; }
+        details.fold > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.6rem; }
+        details.fold > summary::-webkit-details-marker { display: none; }
+        details.fold > summary::before { content: ""; width: 0.45rem; height: 0.45rem; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+            transform: rotate(-45deg); transition: transform 0.15s ease-out; flex: none; }
+        details.fold[open] > summary::before { transform: rotate(45deg); }
+        details.fold > summary h3 { margin: 1rem 0; }
+
+        .heading-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin: 1.6rem 0 0.6rem; }
+        .heading-row h3 { margin: 0; }
+        .copy-list { font: inherit; font-size: 0.8em; font-weight: 600; padding: 0.25rem 0.65rem; color: var(--accent); background: var(--accent-soft);
+            border: 1px solid transparent; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; gap: 0.35rem; }
+        .copy-list.copied { color: var(--ok); background: var(--ok-bg); }
+        .copy-list-text { margin: 0 0 10px; padding: 8px 12px; background: var(--sunken); border-radius: 8px; font-size: 0.85em; white-space: pre-wrap; word-break: break-all; }
+        .copy-list-text[hidden] { display: none; }
+        .mc-list { padding-left: 1.4rem; }
+        .mc-list li { margin-bottom: 0.3rem; }
+
+        /* Alerts: counts by severity, then a group per severity in which alerts of one kind share a row. */
+        .sevbar { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+        .sevbar a, .sevbar span { display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none; padding: 0.3rem 0.6rem; border-radius: 999px; font-weight: 600; font-size: 0.8rem; }
+        .sevbar strong { font-family: var(--font-mono); font-weight: 600; }
+        .sevbar .is-zero { color: var(--muted); background: var(--sunken); }
+        .sev--critical { color: var(--sev-critical); background: var(--sev-critical-bg); }
+        .sev--high { color: var(--sev-high); background: var(--sev-high-bg); }
+        .sev--medium { color: var(--sev-medium); background: var(--sev-medium-bg); }
+        .sev--low { color: var(--sev-low); background: var(--sev-low-bg); }
+        .sevgroup + .sevgroup { margin-top: 1.1rem; }
+        .sevgroup > h3 { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; margin: 0 0 0.5rem; }
+        .sevgroup > h3 strong { font-family: var(--font-mono); color: var(--muted); font-weight: 500; letter-spacing: 0; }
+        .sev-text--critical { color: var(--sev-critical); } .sev-text--high { color: var(--sev-high); }
+        .sev-text--medium { color: var(--sev-medium); } .sev-text--low { color: var(--sev-low); }
+        .alert { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.25rem 0.75rem; padding: 0.8rem 0.9rem; border-radius: 10px; border: 1px solid var(--rule); }
+        .alert + .alert { margin-top: 0.5rem; }
+        .alert__icon { grid-row: span 3; padding-top: 0.1rem; }
+        .alert--high { background: var(--sev-high-bg); border-color: transparent; }
+        .alert--critical { background: var(--sev-critical-bg); border-color: transparent; }
+        .alert__title { font-weight: 650; overflow-wrap: anywhere; }
+        .alert__title span { font-weight: 500; color: var(--muted); }
+        .alert__cols { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        .colchip { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; align-items: baseline; font-size: 0.8rem; padding: 0.15rem 0.5rem; border-radius: 6px;
+            background: var(--sunken); border: 1px solid var(--rule); max-width: 100%; overflow-wrap: anywhere; }
+        .alert--high .colchip, .alert--critical .colchip { background: var(--surface); }
+        .colchip code { color: var(--ink); }
+        .colchip span { font-family: var(--font-mono); color: var(--muted); }
+        .alert__rec { color: var(--muted); font-size: 0.88rem; }
+        .alert__rec strong { color: var(--ink); font-weight: 600; }
+
+        footer { max-width: 80rem; margin: 0 auto; padding: 0 max(16px, env(safe-area-inset-right, 0px)) 2rem max(16px, env(safe-area-inset-left, 0px));
+            display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem; color: var(--muted); font-size: 0.82rem; }
+        footer p { margin: 0; }
+
+        @media (hover: hover) {
+            .theme-toggle:hover { background: var(--sunken); }
+            .toc a:hover { color: var(--ink); background: var(--sunken); }
+            tbody tr:hover { background: var(--sunken); }
+            .copy-list:hover { border-color: var(--accent); }
         }
-        header .subtitle {
-            font-size: 1.1em;
-            opacity: 0.9;
-        }
-        .meta {
-            background: #f9f9f9;
-            padding: 15px 20px;
-            border-bottom: 1px solid #ddd;
-            font-size: 0.9em;
-        }
-        .toc {
-            background: #f0f0f0;
-            padding: 20px;
-            margin: 20px;
-            border-left: 4px solid #667eea;
-            border-radius: 4px;
-        }
-        .toc h3 {
-            margin-bottom: 10px;
-            color: #667eea;
-        }
-        .toc ul {
-            list-style: none;
-        }
-        .toc li {
-            margin: 5px 0;
-            padding-left: 20px;
-        }
-        .toc a {
-            color: #667eea;
-            text-decoration: none;
-        }
-        .toc a:hover {
-            text-decoration: underline;
-        }
-        .alerts-section {
-            background: #fff5e6;
-            border-left: 4px solid #ff9800;
-            margin: 20px;
-            padding: 15px;
-            border-radius: 4px;
-        }
-        .alerts-section h2 {
-            color: #d84315;
-            margin-bottom: 15px;
-        }
-        .alert {
-            margin: 10px 0;
-            padding: 10px;
-            border-left: 3px solid #ff9800;
-            background: white;
-            border-radius: 2px;
-        }
-        .alert.critical {
-            border-left-color: #d32f2f;
-            background: #ffebee;
-        }
-        .alert.high {
-            border-left-color: #f57c00;
-            background: #fff3e0;
-        }
-        .alert.medium {
-            border-left-color: #fbc02d;
-            background: #fffde7;
-        }
-        .alert.low {
-            border-left-color: #0288d1;
-            background: #e1f5fe;
-        }
-        .alert-severity {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 3px;
-            font-weight: bold;
-            font-size: 0.85em;
-            margin-right: 10px;
-            color: white;
-        }
-        .alert.critical .alert-severity {
-            background: #d32f2f;
-        }
-        .alert.high .alert-severity {
-            background: #f57c00;
-        }
-        .alert.medium .alert-severity {
-            background: #fbc02d;
-            color: #333;
-        }
-        .alert.low .alert-severity {
-            background: #0288d1;
-        }
-        section {
-            margin: 30px 20px;
-            padding: 20px;
-            border: 1px solid #eee;
-            border-radius: 4px;
-        }
-        h2 {
-            color: #667eea;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 10px;
-            margin-bottom: 20px;
-        }
-        h3 {
-            color: #764ba2;
-            margin-top: 20px;
-            margin-bottom: 10px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 15px 0;
-            font-size: 0.9em;
-        }
-        th {
-            background: #f0f0f0;
-            padding: 10px;
-            text-align: left;
-            font-weight: 600;
-            border-bottom: 2px solid #ddd;
-        }
-        td {
-            padding: 8px 10px;
-            border-bottom: 1px solid #eee;
-        }
-        tr:hover {
-            background: #f9f9f9;
-        }
-        .plot-container {
-            margin: 20px 0;
-            text-align: center;
-            page-break-inside: avoid;
-        }
-        .plot-container img {
-            max-width: 100%;
-            height: auto;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .stat-box {
-            display: inline-block;
-            background: #f9f9f9;
-            padding: 15px 20px;
-            margin: 10px 5px;
-            border-radius: 4px;
-            border-left: 3px solid #667eea;
-            min-width: 150px;
-        }
-        .stat-box .label {
-            font-size: 0.85em;
-            color: #999;
-            text-transform: uppercase;
-        }
-        .stat-box .value {
-            font-size: 1.5em;
-            font-weight: bold;
-            color: #333;
-            margin-top: 5px;
-        }
-        footer {
-            background: #f0f0f0;
-            padding: 20px;
-            text-align: center;
-            font-size: 0.9em;
-            color: #999;
-            border-top: 1px solid #ddd;
-        }
-        .no-data {
-            padding: 20px;
-            background: #f0f0f0;
-            border-radius: 4px;
-            color: #999;
-            font-style: italic;
-        }
-        h4 {
-            color: #555;
-            margin: 16px 0 8px;
-        }
-        .mc-list {
-            padding-left: 24px;
-        }
-        .mc-list li {
-            margin-bottom: 4px;
-        }
-        .heading-row {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: baseline;
-            gap: 12px;
-            margin: 20px 0 10px;
-        }
-        .heading-row h3 {
-            margin: 0;
-        }
-        .copy-list {
-            font: inherit;
-            font-size: 0.8em;
-            padding: 3px 10px;
-            color: #667eea;
-            background: #f4f5ff;
-            border: 1px solid #c9cdf5;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .copy-list:hover {
-            background: #e8eaff;
-        }
-        .copy-list:focus-visible {
-            outline: 2px solid #667eea;
-            outline-offset: 2px;
-        }
-        .copy-list.copied {
-            color: #2e7d32;
-            background: #f1f8f1;
-            border-color: #a5d6a7;
-        }
-        .copy-list-text {
-            margin: 0 0 10px;
-            padding: 8px 12px;
-            background: #f8f9fa;
-            border-radius: 4px;
-            font-size: 0.85em;
-            white-space: pre-wrap;
-            word-break: break-all;
-        }
-        .copy-list-text[hidden] {
-            display: none;
+        @media (max-width: 60rem) {
+            .layout { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+            .toc { position: sticky; top: 0; z-index: 5; overflow-x: auto; border-radius: 0 0 12px 12px; }
+            .toc ol { display: flex; width: max-content; }
+            .toc .sub a { padding-left: 0.6rem; }
+            html { scroll-padding-top: 4rem; }
+            main > section { padding: 1rem; }
         }
         @media print {
-            body { background: white; }
-            section { page-break-inside: avoid; }
-            .container { box-shadow: none; }
-            .copy-list, .copy-list-text { display: none; }
+            body { background: #fff; color: #000; }
+            .toc, .theme-toggle, .copy-list, .copy-list-text { display: none; }
+            .layout { display: block; }
+            main > section { border: 0; padding: 0; margin-bottom: 1.5rem; break-inside: auto; }
+            .plot-container, .alert, tr { break-inside: avoid; }
         }
     </style>
 </head>
 <body>
-<div class="container">
-    <header>
-        <h1>📊 Exploratory Data Analysis</h1>
-        <p class="subtitle">{{ dataset_name }}</p>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-low" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 9v5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><circle cx="10" cy="6.2" r="1.05" fill="currentColor"/></symbol>
+    <symbol id="i-medium" viewBox="0 0 20 20"><path d="M10 2.6 18 16.8H2L10 2.6Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10 7.8v4.4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1.05" fill="currentColor"/></symbol>
+    <symbol id="i-high" viewBox="0 0 20 20"><path d="M6.9 2h6.2L18 6.9v6.2L13.1 18H6.9L2 13.1V6.9L6.9 2Z" fill="currentColor"/><path d="M10 5.8v5" stroke="var(--surface)" stroke-width="1.9" stroke-linecap="round"/><circle cx="10" cy="13.9" r="1.15" fill="var(--surface)"/></symbol>
+    <symbol id="i-critical" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8.5" fill="currentColor"/><path d="m6.8 6.8 6.4 6.4m0-6.4-6.4 6.4" stroke="var(--surface)" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 20 20"><rect x="7" y="7" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M13 4.5V4a1.5 1.5 0 0 0-1.5-1.5h-7A1.5 1.5 0 0 0 3 4v7a1.5 1.5 0 0 0 1.5 1.5H5" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+</svg>
+<a class="skip" href="#resumen">Skip to the report</a>
+<div class="shell">
+    <header class="masthead">
+        <div>
+            <p class="kind">Exploratory data analysis</p>
+            <h1>{{ dataset_name }}</h1>
+        </div>
+        <div class="chips">
+            <span>Generated <strong>{{ timestamp }}</strong></span>
+            <span>Rows <strong>{{ n_rows }}</strong></span>
+            <span>Columns <strong>{{ n_cols }}</strong></span>
+            <span>Correlation id <strong>{{ correlation_id }}</strong></span>
+            {% if failed_steps %}<span class="status status--failed">{{ failed_steps | length }} step{% if failed_steps | length != 1 %}s{% endif %} failed</span>
+            {% else %}<span class="status status--ok">All steps ran</span>{% endif %}
+            <button type="button" class="theme-toggle" id="theme-toggle">Theme: system</button>
+        </div>
     </header>
 
-    <div class="meta">
-        <strong>Generated:</strong> {{ timestamp }} |
-        <strong>Rows:</strong> {{ n_rows }} |
-        <strong>Columns:</strong> {{ n_cols }} |
-        <strong>Correlation id:</strong> {{ correlation_id }}
-    </div>
-
-    <div class="toc">
-        <h3>📑 Contents</h3>
-        <ul>
+    <div class="layout">
+    <nav class="toc" aria-label="Report sections">
+        <ol>
             <li><a href="#resumen">Summary</a></li>
-            <li><a href="#alertas">Alerts</a></li>
+            {% if alerts %}<li><a href="#alertas">Alerts <span class="count">{{ alerts | length }}</span></a></li>{% endif %}
+            {% if failed_steps %}<li><a href="#fallidos">Failed Steps <span class="count">{{ failed_steps | length }}</span></a></li>{% endif %}
             <li><a href="#calidad">Data Quality</a></li>
             {% if preview_rows %}<li><a href="#muestra">First Rows</a></li>{% endif %}
             <li><a href="#univariado">Column by Column</a></li>
-            <li><a href="#relaciones">Relationships</a></li>
+            {% if correlations %}<li><a href="#relaciones">Relationships</a></li>{% endif %}
             {% if outliers %}<li><a href="#outliers">Outliers</a></li>{% endif %}
             {% if target_analysis %}<li><a href="#target">Target</a></li>{% endif %}
             <li><a href="#visualizaciones">Charts</a></li>
-            {% if multicollinearity %}<li><a href="#multicolinealidad">Multicollinearity</a></li>{% endif %}
-            {% if transforms and transforms.columns %}<li><a href="#transformaciones">Skewed Columns</a></li>{% endif %}
-            {% if recommendation_steps %}<li><a href="#preprocesamiento">Preprocessing Plan</a></li>{% endif %}
-        </ul>
-    </div>
-
-    {% if alerts %}
-    <div class="alerts-section">
-        <h2 id="alertas">⚠️ Alerts ({{ alerts | length }})</h2>
-        {% for alert in alerts %}
-        <div class="alert {{ alert.severity }}">
-            <span class="alert-severity">{{ alert.severity | upper }}</span>
-            {% if alert.column %}<strong>{{ alert.column }}:</strong>{% endif %}
-            {{ alert.message }}
-            {% if alert.recommendation %}<br><em>→ {{ alert.recommendation }}</em>{% endif %}
-        </div>
-        {% endfor %}
-    </div>
-    {% endif %}
-
-    {% if failed_steps %}
-    <div class="alerts-section">
-        <h2>❌ Failed Steps ({{ failed_steps | length }})</h2>
-        <p>These analysis steps failed and were skipped; the rest of the report was produced anyway.
-           The logs hold the traceback under correlation id <code>{{ correlation_id }}</code>.</p>
-        <ul>
-            {% for step in failed_steps %}
-            <li><code>{{ step }}</code></li>
-            {% endfor %}
-        </ul>
-    </div>
-    {% endif %}
+            {% if multicollinearity %}<li class="sub"><a href="#multicolinealidad">Multicollinearity</a></li>{% endif %}
+            {% if transforms and transforms.columns %}<li class="sub"><a href="#transformaciones">Skewed Columns</a></li>{% endif %}
+            {% if recommendation_steps %}<li><a href="#preprocesamiento">Preprocessing Plan <span class="count">{{ recommendations | length }}</span></a></li>{% endif %}
+        </ol>
+    </nav>
+    <main>
 
     <section id="resumen">
-        <h2>📈 Summary</h2>
-        <div>
+        <h2>Summary</h2>
+        <div class="readout">
             <div class="stat-box">
                 <div class="label">Rows</div>
                 <div class="value">{{ n_rows }}</div>
@@ -456,17 +395,69 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <div class="label">Duplicate rows</div>
                 <div class="value">{{ duplicates }}</div>
             </div>
+            <div class="stat-box">
+                <div class="label">Alerts</div>
+                <div class="value">{{ alerts | length }}</div>
+                {% if alerts %}<div class="more">{% for severity, count in alert_counts.items() if count %}{{ count }} {{ severity }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+            </div>
+            {% if target_analysis %}
+            <div class="stat-box is-target">
+                <div class="label">Target</div>
+                <div class="value">{{ target_analysis.target_column }}</div>
+                <div class="more">{{ target_analysis.target_type }}</div>
+            </div>
+            {% endif %}
         </div>
     </section>
 
+    {% if alerts %}
+    <section id="alertas">
+        <div class="section-head">
+            <h2>Alerts</h2>
+            <nav class="sevbar" aria-label="Alerts by severity">
+                {% for severity, count in alert_counts.items() %}
+                {% if count %}<a href="#alertas-{{ severity }}" class="sev--{{ severity }}"><svg class="i" aria-hidden="true"><use href="#i-{{ severity }}"/></svg>{{ severity | capitalize }} <strong>{{ count }}</strong></a>
+                {% else %}<span class="is-zero"><svg class="i" aria-hidden="true"><use href="#i-{{ severity }}"/></svg>{{ severity | capitalize }} <strong>0</strong></span>{% endif %}
+                {% endfor %}
+            </nav>
+        </div>
+        {% for group in alert_groups %}
+        <div class="sevgroup" id="alertas-{{ group.severity }}">
+            <h3 class="sev-text--{{ group.severity }}"><svg class="i" aria-hidden="true"><use href="#i-{{ group.severity }}"/></svg>{{ group.severity }} <strong>{{ group.count }}</strong></h3>
+            {% for row in group.rows %}
+            <div class="alert alert--{{ group.severity }}">
+                <span class="alert__icon sev-text--{{ group.severity }}"><svg class="i" aria-hidden="true"><use href="#i-{{ group.severity }}"/></svg></span>
+                <div class="alert__title">{{ row.title }}{% if row.columns | length > 1 %} <span>· {{ row.columns | length }} columns</span>{% endif %}</div>
+                {% if row.columns %}<div class="alert__cols">{% for column, detail in row.columns %}<span class="colchip"><code>{{ column }}</code>{% if detail %}<span>{{ detail }}</span>{% endif %}</span>{% endfor %}</div>{% endif %}
+                {% if row.recommendation %}<div class="alert__rec"><strong>What to do:</strong> {{ row.recommendation }}</div>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if failed_steps %}
+    <section id="fallidos">
+        <h2>Failed Steps ({{ failed_steps | length }})</h2>
+        <p>These analysis steps failed and were skipped; the rest of the report was produced anyway.
+           The logs hold the traceback under correlation id <code>{{ correlation_id }}</code>.</p>
+        <ul>
+            {% for step in failed_steps %}
+            <li><code>{{ step }}</code></li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
     <section id="calidad">
-        <h2>🔍 Data Quality</h2>
+        <h2>Data Quality</h2>
 
         <h3>Type and Missing Values per Column</h3>
         <p>"Stored as" is how the column ended up in memory (hover for the exact pandas dtype);
            "Read as" is how the pipeline classified it, and that is what decides which analyses and
            which alerts it receives.</p>
-        <table>
+        <div class="table-wrap"><table>
             <thead>
                 <tr><th>Column</th><th>Stored as</th><th>Read as</th><th>Missing (%)</th></tr>
             </thead>
@@ -480,7 +471,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
 
         {% if constant_columns %}
         <h3>Constant Columns</h3>
@@ -495,7 +486,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% if quasi_constant_columns %}
         <h3>Almost Constant Columns</h3>
         <p>These columns are dominated by one value:</p>
-        <table>
+        <div class="table-wrap"><table>
             <thead>
                 <tr><th>Column</th><th>Share of its most common value</th></tr>
             </thead>
@@ -507,7 +498,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
         {% endif %}
 
         {% if ignored_columns %}
@@ -523,10 +514,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     {% if preview_rows %}
     <section id="muestra">
-        <h2>🧾 First Rows</h2>
+        <h2>First Rows</h2>
         <p>The first {{ preview_rows | length }} rows as they were read. A missing value shows as "—"
            and very long text is cut.</p>
-        <div style="overflow-x: auto;">
+        <div class="scroll-x">
             <table>
                 <thead>
                     <tr>{% for col in preview_columns %}<th>{{ col }}</th>{% endfor %}</tr>
@@ -542,16 +533,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     {% endif %}
 
     <section id="univariado">
-        <h2>📊 Column by Column</h2>
+        <h2>Column by Column</h2>
 
         {% if numeric_stats %}
         <div class="heading-row">
             <h3>Numeric Columns</h3>
             <button type="button" class="copy-list" data-copy-from="copy-list-num"
-                    title="Copy num = [...] with the {{ numeric_stats | length }} numeric column names">📋 Copy list</button>
+                    title="Copy num = [...] with the {{ numeric_stats | length }} numeric column names"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="label">Copy list</span></button>
         </div>
         <pre class="copy-list-text" id="copy-list-num" hidden>{{ numeric_list }}</pre>
-        <table>
+        <div class="table-wrap"><table>
             <thead>
                 <tr>
                     <th>Column</th><th>Mean</th><th>Median</th><th>Std. dev.</th>
@@ -572,17 +563,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
         {% endif %}
 
         {% if categorical_stats %}
         <div class="heading-row">
             <h3>Categorical Columns</h3>
             <button type="button" class="copy-list" data-copy-from="copy-list-cat"
-                    title="Copy cat = [...] with the {{ categorical_stats | length }} categorical column names">📋 Copy list</button>
+                    title="Copy cat = [...] with the {{ categorical_stats | length }} categorical column names"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg><span class="label">Copy list</span></button>
         </div>
         <pre class="copy-list-text" id="copy-list-cat" hidden>{{ categorical_list }}</pre>
-        <table>
+        <div class="table-wrap"><table>
             <thead>
                 <tr><th>Column</th><th>Distinct</th><th>Most common</th><th>Missing</th></tr>
             </thead>
@@ -596,12 +587,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
         {% endif %}
 
         {% if time_stats %}
         <h3>Time of Day Columns</h3>
-        <table>
+        <div class="table-wrap"><table>
             <thead>
                 <tr><th>Column</th><th>Distinct</th><th>Earliest</th><th>Latest</th><th>Peak hour</th><th>Missing</th></tr>
             </thead>
@@ -617,17 +608,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
         {% endif %}
     </section>
 
     {% if correlations %}
     <section id="relaciones">
-        <h2>🔗 Relationships</h2>
+        <h2>Relationships</h2>
 
         <h3>Significant Correlations (Pearson)</h3>
         {% if numeric_pairs %}
-        <table>
+        <div class="table-wrap"><table>
             <thead>
                 <tr><th>Column 1</th><th>Column 2</th><th>Correlation</th><th>P-value</th></tr>
             </thead>
@@ -641,14 +632,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
         {% else %}
         <p class="no-data">No significant correlation was found.</p>
         {% endif %}
 
         {% if categorical_pairs %}
         <h3>Categorical Associations (Cramér's V)</h3>
-        <table>
+        <div class="table-wrap"><table>
             <thead>
                 <tr><th>Column 1</th><th>Column 2</th><th>Cramér's V</th></tr>
             </thead>
@@ -661,14 +652,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
         {% endif %}
     </section>
     {% endif %}
 
     {% if outliers %}
     <section id="outliers">
-        <h2>🎯 Outliers</h2>
+        <h2>Outliers</h2>
         <p>Found with three methods: IQR, MAD (a robust z-score) and a multivariate Isolation Forest.</p>
         <p><strong>Rows flagged by at least one of them:</strong> {{ outliers.outlier_indices_union | length }}</p>
         {% if outliers.multivariate_note %}
@@ -687,13 +678,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     {% if target_analysis %}
     <section id="target">
-        <h2>🎯 Target</h2>
+        <h2>Target</h2>
         <p><strong>Target:</strong> {{ target_analysis.target_column }} ({{ target_analysis.target_type }})</p>
         <p><strong>Rows:</strong> {{ target_analysis.n_samples }} | <strong>Missing:</strong> {{ target_analysis.n_missing }}</p>
 
         {% if target_analysis.class_balance %}
         <h3>Class Distribution</h3>
-        <table>
+        <div class="table-wrap"><table>
             <thead>
                 <tr><th>Class</th><th>Rows</th><th>Share</th></tr>
             </thead>
@@ -706,7 +697,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
         {% if target_analysis.class_balance.is_imbalanced %}
         <p><strong>⚠️ Imbalanced:</strong> ratio {{ "%.2f" | format(target_analysis.class_balance.imbalance_ratio) }}</p>
         {% endif %}
@@ -741,7 +732,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% else %}For a numeric target: |Spearman| for numeric columns and eta for categorical ones
            (Kruskal-Wallis p-value).{% endif %}
            Eta and Cramér's V are corrected for what many categories explain by chance alone.</p>
-        <table>
+        <div class="table-wrap"><table>
             <thead>
                 <tr><th>Column</th><th>Test</th><th>P-value</th><th>Effect</th></tr>
             </thead>
@@ -755,11 +746,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
         {% endif %}
 
         {% if target_analysis.leakage_alerts %}
-        <h3>⚠️ Posibles Fugas de Datos</h3>
+        <h3>Posibles Fugas de Datos</h3>
         <ul>
             {% for alert in target_analysis.leakage_alerts %}
             <li>{{ alert }}</li>
@@ -770,12 +761,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     {% endif %}
 
     <section id="visualizaciones">
-        <h2>📸 Charts</h2>
+        <h2>Charts</h2>
 
         {% if plots.correlation %}
         <h3>Correlation Matrix</h3>
         {% if chart_notes.correlation %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.correlation }}</p>
+        <p class="chart-note">{{ chart_notes.correlation }}</p>
         {% endif %}
         <p>Pearson, pair by pair: each cell uses the rows where both columns have a value, the same rows as
            the Pearson table and the scatter plots, so the three read the same numbers.</p>
@@ -791,7 +782,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
            number. The last two run from 0 to 1, carry no sign, and are corrected for what many
            categories explain by chance.</p>
         {% if chart_notes.association %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.association }}</p>
+        <p class="chart-note">{{ chart_notes.association }}</p>
         {% endif %}
         <div class="plot-container">
             <img src="data:image/png;base64,{{ plots.association[0] }}" alt="Association Matrix">
@@ -841,7 +832,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
         {% if ranked %}
         <h4>Highest VIF{% if exact_count %} outside the exact combinations{% endif %}</h4>
-        <table>
+        <div class="table-wrap"><table>
             <thead>
                 <tr><th>Column</th><th>VIF</th><th>Explained mostly by</th></tr>
             </thead>
@@ -854,7 +845,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
         {% set rest = (mc.columns | length) - exact_count - (ranked | length) %}
         {% if rest %}
         <p>The other {{ rest }} columns have a VIF under {{ "%g" | format(shown_vif) }}.</p>
@@ -882,7 +873,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <p>Measured again on the {{ left }} column{% if left != 1 %}s{% endif %} left. A column that read ∞ inside an
            exact combination shows here the VIF it really keeps.</p>
         {% if after %}
-        <table>
+        <div class="table-wrap"><table>
             <thead>
                 <tr><th>Column</th><th>VIF</th><th>Explained mostly by</th></tr>
             </thead>
@@ -895,7 +886,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
         {% set rest_after = left - (after | length) %}
         {% if rest_after == 1 %}
         <p>The other column has a VIF under {{ "%g" | format(shown_vif) }}.</p>
@@ -922,12 +913,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if plots.histograms %}
-        <h3>Numeric Distributions ({{ plots.histograms | length }})</h3>
+        <details class="fold" open><summary><h3>Numeric Distributions ({{ plots.histograms | length }})</h3></summary>
         {% if chart_notes.histograms %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.histograms }}</p>
+        <p class="chart-note">{{ chart_notes.histograms }}</p>
         {% endif %}
         {% if floor_split_columns %}
-        <p style="color: #555; margin-top: -8px;">
+        <p class="chart-note">
             Drawn a second time without the value that fills them, beside the whole column:
             {% for col, check in floor_split_columns.items() %}<strong>{{ col }}</strong>
             ({{ "%g" | format(check.floor) }} on {{ "%.1f" | format(check.floor_pct) }}% of the rows){% if not loop.last %}, {% endif %}{% endfor %}.
@@ -938,50 +929,52 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </p>
         {% endif %}
         {% if log_scale_columns %}
-        <p style="color: #555; margin-top: -8px;">
+        <p class="chart-note">
             With a log scale to the right of the linear one: <strong>{{ log_scale_columns | join(", ") }}</strong>.
             Used when the middle 90% of the rows takes less than 30% of the axis, the log at least doubles that
             span, and at most 5% of the values are 0 or negative (those are left out of the log panel).
         </p>
         {% endif %}
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.histograms %}
             <div class="plot-container">
                 <img src="data:image/png;base64,{{ img }}" alt="Histogram">
             </div>
             {% endfor %}
         </div>
+        </details>
         {% endif %}
 
         {% if plots.boxplots %}
-        <h3>Boxplots ({{ plots.boxplots | length }})</h3>
+        <details class="fold" open><summary><h3>Boxplots ({{ plots.boxplots | length }})</h3></summary>
         {% if chart_notes.boxplots %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.boxplots }}</p>
+        <p class="chart-note">{{ chart_notes.boxplots }}</p>
         {% endif %}
         {% if floor_split_columns %}
-        <p style="color: #555; margin-top: -8px;">
+        <p class="chart-note">
             Without the value that fills them, beside the whole column:
             <strong>{{ floor_split_columns | join(", ") }}</strong>.
         </p>
         {% endif %}
         {% if log_scale_columns %}
-        <p style="color: #555; margin-top: -8px;">
+        <p class="chart-note">
             With a log scale to the right of the linear one: <strong>{{ log_scale_columns | join(", ") }}</strong>.
         </p>
         {% endif %}
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.boxplots %}
             <div class="plot-container">
                 <img src="data:image/png;base64,{{ img }}" alt="Boxplot">
             </div>
             {% endfor %}
         </div>
+        </details>
         {% endif %}
 
         {% if transforms and transforms.columns %}
         <h3 id="transformaciones">Skewed Columns, Before and After a Transformation</h3>
         {% if chart_notes.qq %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.qq }}</p>
+        <p class="chart-note">{{ chart_notes.qq }}</p>
         {% endif %}
         <p>A normal QQ plot sets a column's values against the values a normal distribution would have in the
            same positions: on the red line, the column is normal, and a tail that bends away from it is longer
@@ -1000,7 +993,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             (skew {{ "%.2f" | format(check.skew_before) }}: {{ describe_attempts(check) }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>
         {% endif %}
         {% if plots.qq %}
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.qq %}
             <div class="plot-container">
                 <img src="data:image/png;base64,{{ img }}" alt="QQ plot before and after">
@@ -1011,72 +1004,76 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if plots.categorical %}
-        <h3>Categorical Distributions ({{ plots.categorical | length }})</h3>
+        <details class="fold" open><summary><h3>Categorical Distributions ({{ plots.categorical | length }})</h3></summary>
         {% if chart_notes.categorical %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.categorical }}</p>
+        <p class="chart-note">{{ chart_notes.categorical }}</p>
         {% endif %}
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.categorical %}
             <div class="plot-container">
                 <img src="data:image/png;base64,{{ img }}" alt="Categorical">
             </div>
             {% endfor %}
         </div>
+        </details>
         {% endif %}
 
         {% if plots.pie %}
-        <h3>Categorical Shares ({{ plots.pie | length }})</h3>
-        <p style="color: #555; margin-top: -8px;">
+        <details class="fold" open><summary><h3>Categorical Shares ({{ plots.pie | length }})</h3></summary>
+        <p class="chart-note">
             Each category as a share of the rows that have a value. Only for columns with up to
             {{ pie_max_categories }} categories: above that the slices stop being distinguishable and the bar chart is enough.
         </p>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.pie %}
             <div class="plot-container">
                 <img src="data:image/png;base64,{{ img }}" alt="Pie chart">
             </div>
             {% endfor %}
         </div>
+        </details>
         {% endif %}
 
         {% if plots.target_categorical %}
-        <h3>Target vs Categorical Columns ({{ plots.target_categorical | length }})</h3>
+        <details class="fold" open><summary><h3>Target vs Categorical Columns ({{ plots.target_categorical | length }})</h3></summary>
         {% if chart_notes.target_categorical %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.target_categorical }}</p>
+        <p class="chart-note">{{ chart_notes.target_categorical }}</p>
         {% endif %}
-        <p style="color: #555; margin-top: -8px;">
+        <p class="chart-note">
             Grouped bars of each categorical column against the target
             {% if target_analysis %}<strong>{{ target_analysis.target_column }}</strong>{% endif %}.
             Every label is a share of the chart total, so the bars add up to 100%.
         </p>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.target_categorical %}
             <div class="plot-container">
                 <img src="data:image/png;base64,{{ img }}" alt="Target vs categorical">
             </div>
             {% endfor %}
         </div>
+        </details>
         {% endif %}
 
         {% if plots.scatter %}
-        <h3>Scatter Plots (Most Correlated Pairs)</h3>
+        <details class="fold" open><summary><h3>Scatter Plots (Most Correlated Pairs)</h3></summary>
         {% if log_scale_columns %}
-        <p style="color: #555; margin-top: -8px;">
+        <p class="chart-note">
             With a log scale to the right of the linear one: <strong>{{ log_scale_columns | join(", ") }}</strong>.
         </p>
         {% endif %}
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.scatter %}
             <div class="plot-container">
                 <img src="data:image/png;base64,{{ img }}" alt="Scatter">
             </div>
             {% endfor %}
         </div>
+        </details>
         {% endif %}
 
         {% if plots.pair_plot and pair_plot %}
         <h3>Pair Plot: How the Numeric Columns Relate</h3>
-        <p style="color: #555; margin-top: -8px;">
+        <p class="chart-note">
             Each panel crosses two of these columns: <strong>{{ pair_plot.columns | join(", ") }}</strong>.
             The diagonal holds each one's distribution{% if pair_plot.hue %}, by group{% endif %}.
             {% if pair_plot.hue_reason == "target" %}
@@ -1098,7 +1095,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <img src="data:image/png;base64,{{ plots.pair_plot[0] }}" alt="Pair plot">
         </div>
         {% if plots.pair_plot_log %}
-        <p style="color: #555;">
+        <p class="chart-note">
             The same pair plot with a log scale (log10) on
             <strong>{% for col in pair_plot.columns if col in log_scale_columns %}{{ col }}{% if not loop.last %}, {% endif %}{% endfor %}</strong>,
             to compare against the one above. Rows with 0 or negative values in those columns are left out.
@@ -1110,34 +1107,36 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% endif %}
 
         {% if plots.timeseries %}
-        <h3>Rows Over Time ({{ plots.timeseries | length }})</h3>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+        <details class="fold" open><summary><h3>Rows Over Time ({{ plots.timeseries | length }})</h3></summary>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.timeseries %}
             <div class="plot-container">
                 <img src="data:image/png;base64,{{ img }}" alt="Time series">
             </div>
             {% endfor %}
         </div>
+        </details>
         {% endif %}
 
         {% if plots.time_of_day %}
-        <h3>By Hour of the Day ({{ plots.time_of_day | length }})</h3>
+        <details class="fold" open><summary><h3>By Hour of the Day ({{ plots.time_of_day | length }})</h3></summary>
         {% if chart_notes.time_of_day %}
-        <p style="color: #555; margin-top: -8px;">{{ chart_notes.time_of_day }}</p>
+        <p class="chart-note">{{ chart_notes.time_of_day }}</p>
         {% endif %}
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.time_of_day %}
             <div class="plot-container">
                 <img src="data:image/png;base64,{{ img }}" alt="Time of day">
             </div>
             {% endfor %}
         </div>
+        </details>
         {% endif %}
     </section>
 
     {% if recommendation_steps %}
     <section id="preprocesamiento">
-        <h2>🧭 Preprocessing Plan ({{ recommendations | length }})</h2>
+        <h2>Preprocessing Plan ({{ recommendations | length }})</h2>
         <p>The steps in the order they are applied, and next to every line the measurement that produced
            it, so it can be checked instead of believed.</p>
         <p><strong>Only what the data settles on its own is here.</strong> Two things are left out, because
@@ -1147,7 +1146,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
            text only appear when they hold numbers as text.</p>
         {% for step, label, rows in recommendation_steps %}
         <h3>{{ label }} ({{ rows | length }})</h3>
-        <table>
+        <div class="table-wrap"><table>
             <thead>
                 <tr><th style="width: 18%;">Column</th><th style="width: 34%;">Action</th><th>Why (measured)</th></tr>
             </thead>
@@ -1156,22 +1155,60 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <tr>
                     <td>{% if rec.column %}<code>{{ rec.column }}</code>{% else %}<em>whole table</em>{% endif %}</td>
                     <td>{{ rec.action }}</td>
-                    <td style="color: #555;">{{ rec.evidence }}</td>
+                    <td class="chart-note">{{ rec.evidence }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
-        </table>
+        </table></div>
         {% endfor %}
     </section>
     {% endif %}
 
-    <footer>
-        <p>Generated by EDA Pipeline v0.1.0 | self-contained report, works offline</p>
-    </footer>
+    </main>
+    </div>
 </div>
+<footer>
+    <p>Generated by EDA Pipeline v0.1.0 · a self-contained report that works offline</p>
+    <p><a href="#resumen">Back to the top</a></p>
+</footer>
 <script>
-/* The report's only script: the "Copy list" buttons beside Numeric and Categorical Columns. */
+/* The report's only script: the theme toggle, the section the navigation marks, and the "Copy list" buttons. */
 (function () {
+    var root = document.documentElement;
+
+    var themes = ["system", "light", "dark"];
+    var toggle = document.getElementById("theme-toggle");
+    var theme = "system";
+    try { theme = localStorage.getItem("eda-report-theme") || "system"; } catch (err) {}
+    function applyTheme(next) {
+        theme = themes.indexOf(next) >= 0 ? next : "system";
+        if (theme === "system") { root.removeAttribute("data-theme"); } else { root.setAttribute("data-theme", theme); }
+        toggle.textContent = "Theme: " + theme;
+        try { localStorage.setItem("eda-report-theme", theme); } catch (err) {}
+    }
+    applyTheme(theme);
+    toggle.addEventListener("click", function () { applyTheme(themes[(themes.indexOf(theme) + 1) % themes.length]); });
+
+    var links = Array.prototype.slice.call(document.querySelectorAll(".toc a"));
+    var targets = links.map(function (link) { return document.getElementById(link.getAttribute("href").slice(1)); });
+    var ticking = false;
+    function markCurrent() {
+        ticking = false;
+        var current = 0;
+        if (window.scrollY > 8) {
+            targets.forEach(function (target, index) {
+                if (target && target.getBoundingClientRect().top < window.innerHeight * 0.3) { current = index; }
+            });
+        }
+        links.forEach(function (link, index) {
+            if (index === current) { link.setAttribute("aria-current", "true"); } else { link.removeAttribute("aria-current"); }
+        });
+    }
+    window.addEventListener("scroll", function () {
+        if (!ticking) { ticking = true; window.requestAnimationFrame(markCurrent); }
+    }, { passive: true });
+    markCurrent();
+
     function legacyCopy(value) {
         var area = document.createElement("textarea");
         area.value = value;
@@ -1202,16 +1239,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     document.querySelectorAll("button.copy-list").forEach(function (button) {
         var source = document.getElementById(button.dataset.copyFrom);
-        var label = button.textContent;
+        var label = button.querySelector(".label");
+        var text = label.textContent;
         button.addEventListener("click", function () {
             copy(source.textContent).then(function (ok) {
                 button.focus();
                 if (ok) {
                     source.hidden = true;
-                    button.textContent = "✓ Copied";
+                    label.textContent = "Copied";
                     button.classList.add("copied");
                     setTimeout(function () {
-                        button.textContent = label;
+                        label.textContent = text;
                         button.classList.remove("copied");
                     }, 1600);
                     return;
@@ -1343,6 +1381,8 @@ def generate_html_report(
         "floor_split_min_share": FLOOR_SPLIT_MIN_SHARE,
         "floor_split_min_distinct": FLOOR_SPLIT_MIN_DISTINCT,
         "alerts": alerts,
+        "alert_counts": alert_counts(alerts),
+        "alert_groups": alert_groups(alerts),
         "ignored_columns": ignored_columns or [],
         "failed_steps": failed_steps or [],
         "format_measure": format_measure,

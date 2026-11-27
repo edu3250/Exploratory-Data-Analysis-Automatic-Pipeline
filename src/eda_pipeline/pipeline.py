@@ -192,6 +192,7 @@ def _build_target_alerts(target_report) -> list[Alert]:
                     f"the majority class covers {majority_pct:.1f}% of the rows."
                 ),
                 recommendation="Consider resampling (SMOTE, undersampling) or metrics that survive imbalance (F1, AUC-PR).",
+                kind="class_imbalance",
             )
         )
     for leak_message in target_report.leakage_alerts:
@@ -201,6 +202,7 @@ def _build_target_alerts(target_report) -> list[Alert]:
                 column=target_report.target_column,
                 message=leak_message,
                 recommendation="Check whether this column should be kept out of the model as leakage.",
+                kind="leakage",
             )
         )
     return alerts
@@ -218,6 +220,8 @@ def _placeholder_alerts(missing_placeholders: dict[str, dict[str, int]]) -> list
                 column=column,
                 message=f"Column '{column}': {total} punctuation-only value(s) were read as missing: {values}",
                 recommendation="Check where the data came from: those markers usually stand for a value nobody recorded.",
+                kind="punctuation_missing",
+                detail=f"{total} values: {values}",
             )
         )
     return alerts
@@ -472,6 +476,7 @@ class EDAPipeline:
                 column=target_column,
                 message=message,
                 recommendation="Check the target column name, or drop the --target option.",
+                kind="target_missing",
             )
             target_column = None
 
@@ -775,7 +780,14 @@ class EDAPipeline:
                 "missing_placeholders": missing_placeholders,
             },
             "alerts": [
-                {"severity": a.severity, "column": a.column, "message": a.message, "recommendation": a.recommendation}
+                {
+                    "severity": a.severity,
+                    "column": a.column,
+                    "message": a.message,
+                    "recommendation": a.recommendation,
+                    "kind": a.kind,
+                    "detail": a.detail,
+                }
                 for a in combined_alerts
             ],
             "univariate": {

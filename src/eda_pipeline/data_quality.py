@@ -24,6 +24,10 @@ class Alert:
     column: Optional[str]
     message: str
     recommendation: Optional[str] = None
+    # What the alert is about ("missing", "high_cardinality"...), so the report can show the alerts of one
+    # kind as one line, and the figure for its column ("96.6%", "6,560 distinct") to show beside the name.
+    kind: Optional[str] = None
+    detail: Optional[str] = None
 
 
 @dataclass
@@ -67,6 +71,8 @@ def analyze_missing(
                     column=col,
                     message=f"Column '{col}': {pct:.1f}% of its values are missing",
                     recommendation="Consider dropping this column, or imputing it from the other columns",
+                    kind="missing",
+                    detail=f"{pct:.1f}%",
                 )
             )
         elif pct > 50:
@@ -76,6 +82,8 @@ def analyze_missing(
                     column=col,
                     message=f"Column '{col}': {pct:.1f}% of its values are missing",
                     recommendation="Check whether what is missing carries information or is missing at random",
+                    kind="missing",
+                    detail=f"{pct:.1f}%",
                 )
             )
 
@@ -89,6 +97,7 @@ def analyze_missing(
                 column=None,
                 message=f"{len(rows_with_all_missing)} completely empty row(s)",
                 recommendation="Remove these rows",
+                kind="empty_rows",
             )
         )
 
@@ -150,6 +159,7 @@ def analyze_duplicates(df: pd.DataFrame, duplicate_threshold: float = 0.1) -> tu
                 column=None,
                 message=f"{n_duplicates} exact duplicate rows ({dup_ratio * 100:.2f}%)",
                 recommendation="Check whether the duplicates are legitimate or an entry error",
+                kind="duplicates",
             )
         )
 
@@ -192,6 +202,7 @@ def analyze_constants(
                 column=None,
                 message=f"{len(constant_cols)} column(s) hold a single value: {', '.join(constant_cols)}",
                 recommendation="Drop these columns: they distinguish nothing",
+                kind="constant",
             )
         )
 
@@ -202,6 +213,8 @@ def analyze_constants(
                 column=col,
                 message=f"Almost constant column: one value on {pct:.1f}% of the rows",
                 recommendation="There is little left for a model to learn from",
+                kind="quasi_constant",
+                detail=f"{pct:.1f}%",
             )
         )
 
@@ -255,6 +268,8 @@ def analyze_cardinality(
                 column=col,
                 message=f"Column '{col}': {n_unique} distinct values (high cardinality)",
                 recommendation="Consider grouping the values, or hashing them, if this is a category",
+                kind="high_cardinality",
+                detail=f"{n_unique:,} distinct",
             )
         )
 
@@ -297,6 +312,8 @@ def detect_mixed_types(df: pd.DataFrame) -> tuple[list[str], list[Alert]]:
                             column=col,
                             message=f"Column '{col}' mixes types: {', '.join(sorted(types_in_col))}",
                             recommendation="Make the type consistent, or find out why it is not",
+                            kind="mixed_types",
+                            detail=", ".join(sorted(types_in_col)),
                         )
                     )
 
@@ -340,6 +357,8 @@ def detect_numeric_as_text(df: pd.DataFrame) -> tuple[dict[str, int], list[Alert
                             column=col,
                             message=f"Column '{col}': {numeric_count}/{len(non_null)} values are numbers kept as text",
                             recommendation="Convert the column to a number so it is analysed as one",
+                            kind="numbers_as_text",
+                            detail=f"{numeric_count}/{len(non_null)} values",
                         )
                     )
 
