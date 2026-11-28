@@ -31,6 +31,7 @@ from eda_pipeline.data_loader import (
 )
 from eda_pipeline.data_quality import analyze_data_quality, analyze_duplicates
 from eda_pipeline.html_report import (
+    alert_groups,
     column_quality_rows,
     overall_missing_pct,
     preview_rows,
@@ -1752,6 +1753,64 @@ class TestScatterPairs:
 
     def test_no_matrix_no_pairs(self):
         assert top_correlated_pairs(pd.DataFrame(), limit=10) == []
+
+
+class TestAlertGroups:
+    """Alerts of one kind and severity read as one line that lists their columns."""
+
+    @staticmethod
+    def _alert(severity, column, kind, detail=None, message=None, recommendation="Do the thing"):
+        from eda_pipeline.data_quality import Alert
+
+        return Alert(severity, column, message or f"{column}: {kind}", recommendation, kind=kind, detail=detail)
+
+    def test_alerts_of_one_kind_share_a_row_in_severity_order(self):
+        alerts = [
+            self._alert("low", "Name", "high_cardinality", "8,473 distinct"),
+            self._alert("high", "Movies", "missing", "100.0%", recommendation="Drop it"),
+            self._alert("low", "Cabin", "high_cardinality", "6,560 distinct"),
+            self._alert("medium", "Notes", "missing", "81.5%", recommendation="Check it"),
+        ]
+
+        groups = alert_groups(alerts)
+
+        assert [g["severity"] for g in groups] == ["high", "medium", "low"]
+        low = groups[-1]
+        assert low["count"] == 2 and len(low["rows"]) == 1
+        assert low["rows"][0]["title"] == "High cardinality"
+        assert low["rows"][0]["columns"] == [("Name", "8,473 distinct"), ("Cabin", "6,560 distinct")]
+
+    def test_a_missing_alert_keeps_its_severity_and_its_own_advice(self):
+        """High (over the threshold) and medium (over half) missing values recommend different things."""
+        alerts = [
+            self._alert("high", "a", "missing", "99.0%", recommendation="Drop it"),
+            self._alert("medium", "b", "missing", "60.0%", recommendation="Check it"),
+        ]
+        rows = [row for group in alert_groups(alerts) for row in group["rows"]]
+        assert [(row["title"], row["recommendation"]) for row in rows] == [
+            ("Missing values", "Drop it"),
+            ("Missing values", "Check it"),
+        ]
+
+    def test_an_alert_about_the_whole_table_shows_its_message(self):
+        alerts = [
+            self._alert("high", None, "duplicates", message="40 exact duplicate rows (20.00%)"),
+            self._alert("high", "target", "class_imbalance", message="Imbalanced classes in target 'target'"),
+        ]
+        rows = alert_groups(alerts)[0]["rows"]
+        assert [row["title"] for row in rows] == [
+            "40 exact duplicate rows (20.00%)",
+            "Imbalanced classes in target 'target'",
+        ]
+        assert all(row["columns"] == [] for row in rows)
+
+    def test_counts_cover_every_severity(self):
+        from eda_pipeline.html_report import alert_counts
+
+        counts = alert_counts(
+            [self._alert("low", "a", "high_cardinality"), self._alert("low", "b", "high_cardinality")]
+        )
+        assert counts == {"critical": 0, "high": 0, "medium": 0, "low": 2}
 
 
 class TestHtmlReport:
