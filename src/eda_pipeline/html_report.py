@@ -12,6 +12,7 @@ from typing import Optional
 
 import pandas as pd
 from jinja2 import Template
+from PIL import Image
 
 from .chart_columns import CHARTS
 from .multicollinearity import CHANCE_R_SQUARED_WARNING, HIGH_VIF, SHOWN_VIF
@@ -138,6 +139,15 @@ def image_to_base64(image_path: Path) -> str:
     """Convert image file to base64 for embedding."""
     with open(image_path, "rb") as f:
         return base64.b64encode(f.read()).decode()
+
+
+def plot_description(image_path) -> Optional[str]:
+    """The description a chart carries in its PNG (see visualizations._save_chart), if any."""
+    try:
+        with Image.open(image_path) as image:
+            return image.text.get("Description") or None
+    except OSError:  # missing or unreadable: the template falls back to the chart's kind
+        return None
 
 
 def encode_plot(plot_path: str) -> str:
@@ -714,7 +724,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
            Transform step of the Preprocessing Plan says how to turn the predictions back.</p>
         {% if plots.qq_target %}
         <div class="plot-container">
-            <img src="data:image/png;base64,{{ plots.qq_target[0] }}" alt="QQ plot of the target">
+            <img src="data:image/png;base64,{{ plots.qq_target[0].data }}" alt="{{ plots.qq_target[0].alt or 'QQ plot of the target' }}">
         </div>
         {% endif %}
         {% else %}
@@ -771,7 +781,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <p>Pearson, pair by pair: each cell uses the rows where both columns have a value, the same rows as
            the Pearson table and the scatter plots, so the three read the same numbers.</p>
         <div class="plot-container">
-            <img src="data:image/png;base64,{{ plots.correlation[0] }}" alt="Correlation Matrix">
+            <img src="data:image/png;base64,{{ plots.correlation[0].data }}" alt="{{ plots.correlation[0].alt or 'Correlation Matrix' }}">
         </div>
         {% endif %}
 
@@ -785,7 +795,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <p class="chart-note">{{ chart_notes.association }}</p>
         {% endif %}
         <div class="plot-container">
-            <img src="data:image/png;base64,{{ plots.association[0] }}" alt="Association Matrix">
+            <img src="data:image/png;base64,{{ plots.association[0].data }}" alt="{{ plots.association[0].alt or 'Association Matrix' }}">
         </div>
         {% endif %}
 
@@ -905,7 +915,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         {% if plots.missing %}
         <h3>Missing Values</h3>
         <div class="plot-container">
-            <img src="data:image/png;base64,{{ plots.missing[0] }}" alt="Missing Values Matrix">
+            <img src="data:image/png;base64,{{ plots.missing[0].data }}" alt="{{ plots.missing[0].alt or 'Missing Values Matrix' }}">
         </div>
         {% elif n_rows and missing_total == 0 %}
         <h3>Missing Values</h3>
@@ -938,7 +948,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.histograms %}
             <div class="plot-container">
-                <img src="data:image/png;base64,{{ img }}" alt="Histogram">
+                <img src="data:image/png;base64,{{ img.data }}" alt="{{ img.alt or 'Histogram' }}">
             </div>
             {% endfor %}
         </div>
@@ -964,7 +974,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.boxplots %}
             <div class="plot-container">
-                <img src="data:image/png;base64,{{ img }}" alt="Boxplot">
+                <img src="data:image/png;base64,{{ img.data }}" alt="{{ img.alt or 'Boxplot' }}">
             </div>
             {% endfor %}
         </div>
@@ -996,7 +1006,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.qq %}
             <div class="plot-container">
-                <img src="data:image/png;base64,{{ img }}" alt="QQ plot before and after">
+                <img src="data:image/png;base64,{{ img.data }}" alt="{{ img.alt or 'QQ plot before and after' }}">
             </div>
             {% endfor %}
         </div>
@@ -1011,7 +1021,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.categorical %}
             <div class="plot-container">
-                <img src="data:image/png;base64,{{ img }}" alt="Categorical">
+                <img src="data:image/png;base64,{{ img.data }}" alt="{{ img.alt or 'Categorical' }}">
             </div>
             {% endfor %}
         </div>
@@ -1027,7 +1037,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.pie %}
             <div class="plot-container">
-                <img src="data:image/png;base64,{{ img }}" alt="Pie chart">
+                <img src="data:image/png;base64,{{ img.data }}" alt="{{ img.alt or 'Pie chart' }}">
             </div>
             {% endfor %}
         </div>
@@ -1047,7 +1057,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.target_categorical %}
             <div class="plot-container">
-                <img src="data:image/png;base64,{{ img }}" alt="Target vs categorical">
+                <img src="data:image/png;base64,{{ img.data }}" alt="{{ img.alt or 'Target vs categorical' }}">
             </div>
             {% endfor %}
         </div>
@@ -1064,7 +1074,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.scatter %}
             <div class="plot-container">
-                <img src="data:image/png;base64,{{ img }}" alt="Scatter">
+                <img src="data:image/png;base64,{{ img.data }}" alt="{{ img.alt or 'Scatter' }}">
             </div>
             {% endfor %}
         </div>
@@ -1092,7 +1102,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             {% endif %}
         </p>
         <div class="plot-container">
-            <img src="data:image/png;base64,{{ plots.pair_plot[0] }}" alt="Pair plot">
+            <img src="data:image/png;base64,{{ plots.pair_plot[0].data }}" alt="{{ plots.pair_plot[0].alt or 'Pair plot' }}">
         </div>
         {% if plots.pair_plot_log %}
         <p class="chart-note">
@@ -1101,7 +1111,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             to compare against the one above. Rows with 0 or negative values in those columns are left out.
         </p>
         <div class="plot-container">
-            <img src="data:image/png;base64,{{ plots.pair_plot_log[0] }}" alt="Pair plot (log10)">
+            <img src="data:image/png;base64,{{ plots.pair_plot_log[0].data }}" alt="{{ plots.pair_plot_log[0].alt or 'Pair plot (log10)' }}">
         </div>
         {% endif %}
         {% endif %}
@@ -1111,7 +1121,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.timeseries %}
             <div class="plot-container">
-                <img src="data:image/png;base64,{{ img }}" alt="Time series">
+                <img src="data:image/png;base64,{{ img.data }}" alt="{{ img.alt or 'Time series' }}">
             </div>
             {% endfor %}
         </div>
@@ -1126,7 +1136,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 20px;">
             {% for img in plots.time_of_day %}
             <div class="plot-container">
-                <img src="data:image/png;base64,{{ img }}" alt="Time of day">
+                <img src="data:image/png;base64,{{ img.data }}" alt="{{ img.alt or 'Time of day' }}">
             </div>
             {% endfor %}
         </div>
@@ -1325,7 +1335,7 @@ def generate_html_report(
     # Encode all plots to base64
     encoded_plots = {}
     for key, files in plot_files.items():
-        encoded_plots[key] = [encode_plot(f) for f in files]
+        encoded_plots[key] = [{"data": encode_plot(f), "alt": plot_description(f)} for f in files]
 
     # Prepare template data
     template_data = {

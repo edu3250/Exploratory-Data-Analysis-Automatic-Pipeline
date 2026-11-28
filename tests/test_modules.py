@@ -1615,6 +1615,17 @@ class TestFloorSplit:
 
         assert mpimg.imread(split).shape[1] > 1.5 * mpimg.imread(plain).shape[1]
 
+    def test_a_split_chart_says_what_kind_of_chart_it_is(self, tmp_output_dir):
+        from eda_pipeline.html_report import plot_description
+        from eda_pipeline.visualizations import check_floor_split, plot_boxplot, plot_histogram
+
+        series = self._spending()
+        check = check_floor_split(series)
+        assert plot_histogram(series, tmp_output_dir / "h.png", floor_split=check)
+        assert plot_boxplot(series, tmp_output_dir / "b.png", floor_split=check)
+        assert plot_description(tmp_output_dir / "h.png").startswith(f"Distribution: {series.name}, beside")
+        assert plot_description(tmp_output_dir / "b.png").startswith(f"Boxplot: {series.name}, beside")
+
     def test_the_split_boxplot_keeps_both_panels(self, tmp_output_dir):
         from eda_pipeline.visualizations import check_floor_split, plot_boxplot
 
@@ -3188,3 +3199,41 @@ class TestTransforms:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestChartTheme:
+    """Charts share the report's look, and each PNG carries a description the report uses as its alt text."""
+
+    def test_charts_use_the_report_colours_and_a_quiet_frame(self):
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import to_hex
+
+        from eda_pipeline.visualizations import CHART_PALETTE
+
+        assert to_hex(plt.rcParams["axes.prop_cycle"].by_key()["color"][0]) == CHART_PALETTE[0]
+        assert CHART_PALETTE[0] == "#0a6a8f"  # the report's --accent in its light theme
+        assert not plt.rcParams["axes.spines.top"] and not plt.rcParams["axes.spines.right"]
+        assert plt.rcParams["font.sans-serif"][-1] == "DejaVu Sans"  # any glyph the system font lacks
+
+    def test_a_chart_keeps_its_title_as_its_description(self, tmp_output_dir):
+        from eda_pipeline.html_report import plot_description
+
+        out = tmp_output_dir / "pie.png"
+        assert plot_pie_chart(pd.Series(["sí", "no", "sí", "tal vez"] * 10, name="respuesta"), out)
+        assert plot_description(out) == "Share: respuesta (n = 40)"
+
+    def test_a_description_outside_latin_1_survives(self, tmp_output_dir):
+        from eda_pipeline.html_report import plot_description
+        from eda_pipeline.visualizations import plot_histogram
+
+        out = tmp_output_dir / "hist.png"
+        assert plot_histogram(pd.Series(np.arange(50.0), name="ratio λ"), out)
+        assert plot_description(out) == "Distribution: ratio λ"
+
+    def test_a_missing_or_foreign_image_has_no_description(self, tmp_output_dir):
+        from eda_pipeline.html_report import plot_description
+
+        assert plot_description(tmp_output_dir / "absent.png") is None
+        not_png = tmp_output_dir / "text.png"
+        not_png.write_text("not an image")
+        assert plot_description(not_png) is None
