@@ -64,7 +64,17 @@ eda analyze-batch data/raw/ --recursive
 
 # a YAML you can edit: delimiters, encodings, column types, thresholds, which charts to draw
 eda init-config
+
+# or from the browser: add files, choose the target, watch each step, open the report
+eda app
 ```
+
+`eda app` serves a page on `http://127.0.0.1:8765/`, on this computer only, so the files never leave it.
+Drop one file or several (several run as a batch) and pick the target from the file's own columns. The
+reading options are there when detection needs help. The page lists each step as it runs, links the
+report when it is done, and keeps a list of recent reports. One analysis runs at a time. Stop the app
+with Ctrl+C: it removes its copies of the files you added and keeps the reports. `--port`,
+`--output-dir` and `--no-browser` change the defaults.
 
 Delimiter, encoding, decimal separator and column types are detected on their own; `--delimiter`,
 `--encoding`, `--decimal`, `--sheet`, `--sample-size` and `--output-dir` override that when you need

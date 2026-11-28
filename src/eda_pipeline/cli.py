@@ -253,6 +253,36 @@ def analyze_batch(
 
 
 @cli.command()
+@click.option("--output-dir", default="reports", show_default=True, help="Where to write the reports")
+@click.option(
+    "--port",
+    default=8765,
+    show_default=True,
+    type=click.IntRange(0, 65535),
+    help="Port on 127.0.0.1 (0 picks a free one)",
+)
+@click.option("--no-browser", is_flag=True, default=False, help="Do not open the page in the browser")
+def app(output_dir, port, no_browser):
+    """
+    Open the local app: add files, choose a target and run the analysis from a page in the browser.
+
+    It runs on this computer only (127.0.0.1), so the files never leave it.
+
+    
+    EXAMPLES:
+        eda app
+        eda app --output-dir ./my_reports --port 9000
+    """
+    from .app import serve
+
+    try:
+        serve(Path(output_dir), port=port, open_browser=not no_browser)
+    except OSError as e:
+        click.secho(f"Could not start the app on port {port}: {e}. Try another one with --port.", fg="red")
+        sys.exit(1)
+
+
+@cli.command()
 @click.option("--output", default="config/default.yaml", help="Path of the configuration file to create")
 def init_config(output):
     """
