@@ -6,6 +6,7 @@ import difflib
 import json
 import traceback
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -274,6 +275,14 @@ class EDAPipeline:
         self.batch_output_dir = None
         # Subfolders a batch left out because it was not recursive: {name: files it holds}.
         self.skipped_subfolders: dict[str, int] = {}
+        # Called as on_progress(dataset_name, step) when a dataset starts a step: "load", "types", then
+        # each _run_step name. The local app (app.py) shows it as the run's progress.
+        self.on_progress: Callable[[str, str], None] | None = None
+        self._current_dataset = ""
+
+    def _progress(self, step: str) -> None:
+        if self.on_progress is not None:
+            self.on_progress(self._current_dataset, step)
 
     def setup(self):
         """Initialize logging and output directories."""
@@ -377,6 +386,8 @@ class EDAPipeline:
 
         `batch_dir` is the run's folder when this file is part of a batch, and None for a single file.
         """
+        self._current_dataset = dataset_name
+        self._progress("load")
         try:
             df = load_data(
                 file_path,
@@ -426,6 +437,7 @@ class EDAPipeline:
         argument intended for ``func`` (e.g. ``generate_html_report`` also
         takes a ``failed_steps=`` argument).
         """
+        self._progress(step_name)
         try:
             return func(*args, **kwargs)
         except Exception as e:
@@ -447,6 +459,7 @@ class EDAPipeline:
         # are replaced before anything reads the data, and reported below as alerts.
         df, missing_placeholders = replace_missing_placeholders(df)
 
+        self._progress("types")
         self.logger.info("Inferring column types...")
         column_types = infer_all_types(df, identifier_min_unique=self.config.data_quality.cardinality_threshold)
         df, override_result = apply_column_type_overrides(df, column_types, self.config.column_types)
