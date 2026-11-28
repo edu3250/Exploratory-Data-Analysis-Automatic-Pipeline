@@ -468,7 +468,7 @@ class TestMissingValuesSection:
         html, matrix = self._run(tmp_output_dir, df, "con_huecos")
 
         assert matrix.exists()
-        assert 'alt="Missing Values Matrix"' in html
+        assert 'alt="Missing values"' in html
 
 
 class TestCappedCharts:
@@ -1656,6 +1656,14 @@ class TestReportLayout:
         assert not re.search(r'(?:src|href)\s*=\s*"(?:https?:)?//', html)
         assert "@import" not in html and "url(http" not in html
 
+    def test_every_chart_is_described_by_what_it_shows(self, tmp_output_dir):
+        result, html = self._report(tmp_output_dir)
+        alts = re.findall(r'<img src="data:image/png;base64,[^"]+" alt="([^"]*)"', html)
+        assert len(alts) == result["n_plots"]
+        assert "Distribution: edad" in alts and "Boxplot: edad" in alts
+        assert "Categories: grupo" in alts and "grupo vs sale" in alts
+        assert not {"Histogram", "Boxplot", "Categorical", "Pie chart", "Scatter"} & set(alts)
+
     def test_chart_galleries_fold(self, tmp_output_dir):
         _, html = self._report(tmp_output_dir)
         charts = html[html.index('id="visualizaciones"') : html.index('id="preprocesamiento"')]
@@ -1737,9 +1745,11 @@ class TestChartFileNames:
         result = _make_pipeline(input_file=str(csv_file), output_dir=str(tmp_output_dir)).run()["medidas"]
         html = Path(result["html_report"]).read_text(encoding="utf-8")
 
-        histograms = re.findall(r'src="data:image/png;base64,([^"]+)" alt="Histogram"', html)
+        histograms = re.findall(r'src="data:image/png;base64,([^"]+)" alt="Distribution: ', html)
         assert len(histograms) == len(labels)
         assert len(set(histograms)) == len(labels), "two columns share one image"
+        alts = set(re.findall(r'alt="Distribution: ([^"]+)"', html))
+        assert alts == {"peso?", "Age", "age", "ratio: a/b", "precio &#34;neto&#34;"}  # each named, quotes escaped
 
 
 if __name__ == "__main__":

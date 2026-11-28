@@ -17,6 +17,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib import MatplotlibDeprecationWarning
+from matplotlib.colors import LinearSegmentedColormap
 
 from .relationships import adjusted_correlation_ratio
 from .transforms import LOG1P, TransformCheck, TransformReport, apply_transform, qq_points
@@ -24,10 +25,122 @@ from .type_inference import coerce_to_datetime, parse_time_of_day
 
 logger = logging.getLogger(__name__)
 
-# Style
-sns.set_style("whitegrid")
-plt.rcParams["figure.figsize"] = (10, 6)
-plt.rcParams["font.size"] = 9
+# The report's light theme, so a chart reads as part of the page around it: the same ink, rules and
+# accent (html_report.py, :root), and the same kind of system sans. In dark mode the report shows the
+# PNGs on a light plate, so one light theme serves both.
+CHART_INK = "#121a22"
+CHART_MUTED = "#55616d"
+CHART_RULE = "#d6dce2"
+CHART_GRID = "#e8ecf0"
+# Series colours, the report's accent first. Each reaches 3:1 against the white plot (WCAG 1.4.11),
+# and the first three, which two- and three-class charts use, differ in lightness as well as hue (OKLab
+# L 0.49, 0.64, 0.57). The pie legend and the bar labels name every category, so no chart relies on
+# colour alone. Ten colours, so the grouped bars (up to TARGET_BAR_MAX_CATEGORIES + 1) never repeat one.
+CHART_PALETTE = [
+    "#0a6a8f",
+    "#c97520",
+    "#3d8a55",
+    "#8c5bb0",
+    "#c4506e",
+    "#5f7282",
+    "#9c8626",
+    "#3b91b8",
+    "#8a5a3c",
+    "#2c7f7b",
+]
+# A single boxplot: a pale fill under accent lines, so the median and the whiskers carry the ink.
+BOX_STYLE = {
+    "color": CHART_PALETTE[0],
+    "linewidth": 1.1,
+    "boxprops": {"facecolor": "#d3e7f0"},
+    "flierprops": {
+        "marker": "o",
+        "markersize": 3,
+        "markerfacecolor": CHART_PALETTE[0],
+        "markeredgecolor": "none",
+        "alpha": 0.5,
+    },
+}
+# The missing-values matrix: present cells nearly the plate, missing ones in the accent, so the gaps stand out.
+MISSING_CMAP = ["#eef1f4", CHART_PALETTE[0]]
+# The fitted line of a QQ plot. The report calls it "the red line", so it stays red.
+QQ_LINE_COLOR = "#c2410c"
+# The first of these the machine has, then DejaVu Sans (matplotlib's own) for any glyph it lacks.
+CHART_FONTS = ("Segoe UI", "Helvetica Neue", "Helvetica", "Arial", "Liberation Sans")
+
+
+def _chart_font() -> list[str]:
+    from matplotlib import font_manager
+
+    installed = {font.name for font in font_manager.fontManager.ttflist}
+    return [name for name in CHART_FONTS if name in installed][:1] + ["DejaVu Sans"]
+
+
+def apply_chart_theme() -> None:
+    """Set matplotlib and seaborn to the report's theme: system sans, quiet axes, the report's colours."""
+    sns.set_theme(style="whitegrid", palette=CHART_PALETTE)
+    plt.rcParams.update(
+        {
+            "figure.figsize": (10, 6),
+            "figure.facecolor": "white",
+            "savefig.facecolor": "white",
+            "font.family": "sans-serif",
+            "font.sans-serif": _chart_font(),
+            "font.size": 9,
+            "text.color": CHART_INK,
+            "axes.facecolor": "white",
+            "axes.edgecolor": CHART_RULE,
+            "axes.linewidth": 0.8,
+            "axes.labelcolor": CHART_MUTED,
+            "axes.labelsize": 9.5,
+            "axes.titlesize": 11,
+            "axes.titleweight": "semibold",
+            "axes.titlecolor": CHART_INK,
+            "axes.titlelocation": "left",
+            "axes.titlepad": 10,
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "axes.grid": True,
+            "grid.color": CHART_GRID,
+            "grid.linewidth": 0.8,
+            "xtick.color": CHART_MUTED,
+            "ytick.color": CHART_MUTED,
+            "xtick.labelcolor": CHART_MUTED,
+            "ytick.labelcolor": CHART_MUTED,
+            "legend.frameon": False,
+            "legend.title_fontsize": 9.5,
+            "figure.titlesize": 12,
+            "figure.titleweight": "semibold",
+            "patch.edgecolor": "white",
+            "lines.linewidth": 1.6,
+        }
+    )
+
+
+apply_chart_theme()
+
+
+def chart_description(fig) -> str | None:
+    """What a chart shows, in words: its figure title, else its first panel's title."""
+    if fig.get_suptitle():
+        return fig.get_suptitle()
+    titles = [ax.get_title() or ax.get_title("left") for ax in fig.axes]
+    return next((title for title in titles if title), None)
+
+
+def _save_chart(output_path: Path, fig=None, layout: bool = True, description: str | None = None) -> None:
+    """
+    Save the current chart, with its description in the PNG (the "Description" text field), which the
+    report reads back as the image's alt text. The file describes itself wherever it is opened.
+    Without a description, the chart's own title is it (see chart_description).
+    """
+    fig = fig if fig is not None else plt.gcf()
+    if layout:
+        fig.tight_layout()
+    description = description or chart_description(fig)
+    fig.savefig(
+        output_path, dpi=100, bbox_inches="tight", metadata={"Description": description} if description else None
+    )
 
 
 @contextmanager
@@ -278,6 +391,7 @@ def plot_histogram(series: pd.Series, output_path: Path, log_scale: bool = False
     the right.
     """
     valid = series.dropna()
+    description = None
     if len(valid) < 2:
         return False
 
@@ -292,6 +406,7 @@ def plot_histogram(series: pd.Series, output_path: Path, log_scale: bool = False
         rest_ax.set_xlabel(f"{series.name} > {floor_split.floor:g}")
         rest_ax.set_ylabel("Frequency")
         fig.suptitle(_floor_figure_note(floor_split, series.name))
+        description = f"Distribution: {series.name}, beside the same without the value {floor_split.floor:g}"
     elif not log_scale:
         fig, ax = plt.subplots(figsize=(10, 6))
         _draw_histogram(ax, valid)
@@ -308,8 +423,7 @@ def plot_histogram(series: pd.Series, output_path: Path, log_scale: bool = False
         log.set_xlabel(f"{series.name} (log)")
         log.set_ylabel("Frequency")
         fig.suptitle(f"Distribution: {series.name}")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path, description=description)
     return True
 
 
@@ -330,6 +444,7 @@ def plot_boxplot(series: pd.Series, output_path: Path, log_scale: bool = False, 
     whole column on the left and what is left of it without its repeated lowest value on the right.
     """
     valid = series.dropna()
+    description = None
     if len(valid) < 2:
         return False
 
@@ -337,39 +452,39 @@ def plot_boxplot(series: pd.Series, output_path: Path, log_scale: bool = False, 
         fig, (whole, rest_ax) = plt.subplots(1, 2, figsize=(14, 6))
         rest = valid[valid > floor_split.floor].astype(float)
         with _suppress_seaborn_boxplot_warning():
-            sns.boxplot(y=valid, ax=whole)
-            sns.boxplot(y=rest, ax=rest_ax, log_scale=floor_split.rest_log)
+            sns.boxplot(y=valid, ax=whole, **BOX_STYLE)
+            sns.boxplot(y=rest, ax=rest_ax, log_scale=floor_split.rest_log, **BOX_STYLE)
         whole.set_title("Whole column")
         whole.set_ylabel(series.name)
         rest_ax.set_title(_floor_panel_title(floor_split))
         rest_ax.set_ylabel(f"{series.name} > {floor_split.floor:g}")
         fig.suptitle(_floor_figure_note(floor_split, series.name))
+        description = f"Boxplot: {series.name}, beside the same without the value {floor_split.floor:g}"
     elif not log_scale:
         fig, ax = plt.subplots(figsize=(8, 6))
         with _suppress_seaborn_boxplot_warning():
-            sns.boxplot(y=valid, ax=ax)
+            sns.boxplot(y=valid, ax=ax, **BOX_STYLE)
         ax.set_title(f"Boxplot: {series.name}")
         ax.set_ylabel(series.name)
     else:
         fig, (linear, log) = plt.subplots(1, 2, figsize=(14, 6))
         positive = valid[valid > 0].astype(float)
         with _suppress_seaborn_boxplot_warning():
-            sns.boxplot(y=valid, ax=linear)
-            sns.boxplot(y=positive, ax=log, log_scale=True)
+            sns.boxplot(y=valid, ax=linear, **BOX_STYLE)
+            sns.boxplot(y=positive, ax=log, log_scale=True, **BOX_STYLE)
         linear.set_title("Linear scale")
         linear.set_ylabel(series.name)
         log.set_title(_log_panel_title(len(valid) - len(positive)))
         log.set_ylabel(f"{series.name} (log)")
         fig.suptitle(f"Boxplot: {series.name}")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path, description=description)
     return True
 
 
 def _draw_qq(ax, values: np.ndarray, title: str, ylabel: str) -> None:
     theoretical, ordered, slope, intercept, _ = qq_points(values)
     ax.scatter(theoretical, ordered, s=10, alpha=0.6)
-    ax.plot(theoretical, slope * theoretical + intercept, color="C3", linewidth=1.5)
+    ax.plot(theoretical, slope * theoretical + intercept, color=QQ_LINE_COLOR, linewidth=1.5)
     ax.set_title(title)
     ax.set_xlabel("Normal quantiles")
     ax.set_ylabel(ylabel)
@@ -395,8 +510,7 @@ def plot_qq_transform(series: pd.Series, check: TransformCheck | None, output_pa
         f"{check.label}({name})",
     )
     fig.suptitle(f"{name}: normal QQ plot before and after {check.label}")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path)
     return True
 
 
@@ -420,8 +534,7 @@ def plot_categorical(series: pd.Series, output_path: Path, top_n: int = 20) -> b
     ax.set_xlabel(series.name)
     ax.set_ylabel("Frequency")
     ax.tick_params(axis="x", rotation=45)
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path)
     return True
 
 
@@ -506,8 +619,7 @@ def plot_pie_chart(series: pd.Series, output_path: Path) -> bool:
     )
     ax.set_title(f"Share: {series.name} (n = {int(counts.sum())})")
     ax.axis("equal")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path)
     return True
 
 
@@ -527,8 +639,7 @@ def plot_correlation_heatmap(corr_matrix: pd.DataFrame, output_path: Path, max_s
             corr_matrix, annot=False, cmap="coolwarm", center=0, ax=ax, square=True, cbar_kws={"label": "Correlation"}
         )
     ax.set_title("Pearson correlation matrix")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path)
     return True
 
 
@@ -563,8 +674,7 @@ def plot_association_heatmap(assoc_matrix: pd.DataFrame, output_path: Path, max_
             cbar_kws={"label": "Association"},
         )
     ax.set_title("Association between columns (Pearson · Cramér's V · eta)")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path)
     return True
 
 
@@ -594,9 +704,10 @@ def plot_missing_matrix(df: pd.DataFrame, output_path: Path) -> bool:
     missing_matrix = df.isnull().astype(int)
     fig, ax = plt.subplots(figsize=(14, 8))
     with _suppress_seaborn_heatmap_warning():
-        # Fixed from 0 to 1, so present is always the darkest colour and missing the lightest.
+        # Fixed from 0 to 1, so present is always the lightest colour and missing the accent.
         sns.heatmap(
             missing_matrix,
+            cmap=LinearSegmentedColormap.from_list("missing", MISSING_CMAP),
             cbar=True,
             ax=ax,
             yticklabels=False,
@@ -607,8 +718,7 @@ def plot_missing_matrix(df: pd.DataFrame, output_path: Path) -> bool:
     ax.set_title("Missing values")
     ax.set_xlabel("Columns")
     ax.set_ylabel(ylabel)
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path)
     return True
 
 
@@ -679,8 +789,7 @@ def plot_scatter(
         log.set_xlabel(f"{x.name} (log)" if log_x else x.name)
         log.set_ylabel(f"{y.name} (log)" if log_y else y.name)
         fig.suptitle(title)
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path)
     return True
 
 
@@ -729,10 +838,8 @@ def plot_time_series(series: pd.Series, output_path: Path) -> bool:
     ax.set_xlabel("Date")
     ax.set_ylabel("Rows")
     ax.set_ylim(bottom=0)
-    ax.grid(True, alpha=0.3)
     fig.autofmt_xdate()
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path)
     return True
 
 
@@ -751,8 +858,7 @@ def plot_time_of_day(series: pd.Series, output_path: Path) -> bool:
     ax.set_title(f"Time of day: {series.name}")
     ax.set_xlabel("Hour")
     ax.set_ylabel("Frequency")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path)
     return True
 
 
@@ -776,8 +882,7 @@ def plot_target_distribution(series: pd.Series, output_path: Path) -> bool:
     ax.set_title(f"Target distribution: {series.name}")
     ax.set_xlabel(series.name)
     ax.set_ylabel("Frequency")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path)
     return True
 
 
@@ -817,8 +922,7 @@ def plot_target_vs_feature(
     ax.set_title(f"{feature.name} vs {target.name}")
     ax.set_xlabel(feature.name)
     ax.set_ylabel(target.name)
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path)
     return True
 
 
@@ -906,8 +1010,7 @@ def plot_target_vs_categorical(
     ax.tick_params(axis="x", rotation=0)
     ax.legend(title=feature.name)
     ax.margins(y=0.12)  # room for the labels above the tallest bar
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path)
     return True
 
 
@@ -1086,7 +1189,7 @@ def plot_pair_plot(
         + (" (log10 on " + ", ".join(logged) + ")" if logged else "")
     )
     grid.figure.suptitle(title, y=1.02)
-    grid.savefig(output_path, dpi=100, bbox_inches="tight")
+    _save_chart(output_path, grid.figure, layout=False)
     return True
 
 
