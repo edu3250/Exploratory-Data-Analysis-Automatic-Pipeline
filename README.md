@@ -12,8 +12,9 @@ recommendation carries the measurement that produced it.
 
 ![The report the pipeline generates](docs/report-preview.png)
 
-<sub>A real report from `data/raw/spaceship_titanic/train.csv` (8 693 × 14). Below the summary, the chart
-the pipeline drew for `RoomService`: 65.5% of its rows are 0, so the column is drawn a second time
+<sub>A real report from `data/raw/spaceship_titanic/train.csv` (8 693 × 14): the run's facts and status,
+a section list that follows the reader, the summary, and the alerts grouped by severity. Below it, the
+chart the pipeline drew for `RoomService`: 65.5% of its rows are 0, so the column is drawn a second time
 without them — that is the only way its distribution is visible at all.</sub>
 
 ---
@@ -105,6 +106,11 @@ Titanic training set.
 | Multicollinearity | Exact linear combinations written as equations (a total and its parts, the dummy trap), VIF, the columns to consider dropping and the VIF left after dropping them |
 | Target analysis | Class balance, leakage checks, and the features most related to the target on one 0-to-1 scale |
 | Preprocessing plan | What to convert, drop, impute, encode, transform and scale — every line with the measurement behind it |
+
+The report is one HTML file that works offline. It opens with a summary and the alerts grouped by
+severity: alerts of one kind share a row that lists each column with its figure, followed by what to
+do. It follows the system's light or dark theme, with a toggle to override it. Chart galleries fold,
+and every chart has an alt text naming the columns it shows.
 
 
 ## Notes and roadmap
