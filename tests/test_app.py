@@ -82,6 +82,15 @@ class TestAppGuards:
         status, _ = _request(server, "POST", "/api/runs", b"{}", {"Content-Type": "application/json"})
         assert status == 403
 
+    def test_a_refused_request_still_gets_its_answer(self, server):
+        # The body is read through before the answer: closing a socket with unread data resets the
+        # connection on Windows, and the client saw an abort instead of the 403 or the 415.
+        body = b"x" * (4 * 1024**2)
+        status, data = _request(server, "POST", "/api/files", body, {"X-File-Name": "big.csv"})
+        assert status == 403 and b"page" in data
+        status, data = _request(server, "POST", "/api/files", body, {"X-EDA-App": "1", "X-File-Name": "big.docx"})
+        assert status == 415 and b"big.docx" in data
+
     def test_reports_are_served_only_from_the_reports_folder(self, server, app):
         (app.output_dir.parent / "secret.html").write_text("no")
         for path in ("/reports/../secret.html", "/reports/..%2Fsecret.html", "/reports/%2e%2e/secret.html"):

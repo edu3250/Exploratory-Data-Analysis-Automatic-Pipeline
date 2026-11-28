@@ -40,6 +40,8 @@ APP_HEADER = "X-EDA-App"
 # A file larger than this is better analysed from the command line, with --sample-size.
 MAX_UPLOAD_BYTES = 2 * 1024**3
 RECENT_REPORTS = 12
+# A refused request's body is read through up to this size, so the client gets the answer (see _discard_body).
+MAX_DISCARDED_BYTES = 64 * 1024**2
 _UNSAFE_IN_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 # The files the server hands out from the reports folder: the reports and what they link to.
 _SERVED_TYPES = {
@@ -394,22 +396,49 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length)
+        self._body_read = True
         try:
-            payload = json.loads(self.rfile.read(length) or b"{}")
+            payload = json.loads(raw or b"{}")
         except ValueError as e:
             raise RequestError(HTTPStatus.BAD_REQUEST, "The request is not valid JSON.") from e
         if not isinstance(payload, dict):
             raise RequestError(HTTPStatus.BAD_REQUEST, "The request must be a JSON object.")
         return payload
 
+    def _discard_body(self) -> None:
+        """
+        Read what is left of a refused request's body before answering. Closing a socket with unread data
+        makes Windows reset the connection, and the client then sees an abort instead of the error.
+        A body too large to read through is not read: the connection closes after the answer.
+        """
+        if self._body_read:
+            return
+        self._body_read = True
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length > MAX_DISCARDED_BYTES:
+            self.close_connection = True
+            return
+        while length > 0:
+            chunk = self.rfile.read(min(65536, length))
+            if not chunk:
+                break
+            length -= len(chunk)
+
     def _handle(self, route) -> None:
+        self._body_read = False
         try:
             self._check_host()
             route()
         except RequestError as e:
+            self._discard_body()
             self._json(e.status, {"error": e.message})
         except Exception:
             logger.exception("Request failed")
+            self._discard_body()
             self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Something failed on the server. Check its log."})
 
     # ---- routes
@@ -451,7 +480,13 @@ class AppHandler(BaseHTTPRequestHandler):
             length = self.headers.get("Content-Length")
             if length is None:
                 raise RequestError(HTTPStatus.LENGTH_REQUIRED, "The upload has no length.")
-            upload = self.app.add_upload(unquote(self.headers.get("X-File-Name", "")), self.rfile, int(length))
+            try:
+                upload = self.app.add_upload(unquote(self.headers.get("X-File-Name", "")), self.rfile, int(length))
+            except RequestError as e:
+                # An incomplete upload read all there was; a refused one read nothing.
+                self._body_read = e.status == HTTPStatus.BAD_REQUEST
+                raise
+            self._body_read = True
             self._json(
                 HTTPStatus.CREATED,
                 {"id": upload.id, "name": upload.name, "size": upload.size, "columns": upload.columns},
